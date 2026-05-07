@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\Environment.props" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{A1B2C3D4-0001-0001-0001-A1B2C3D40001}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>Terraform</RootNamespace>
+    <AssemblyName>Terraform</AssemblyName>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+    <LangVersion>latestmajor</LangVersion>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(OS)' == 'Windows_NT'">
+    <StartAction>Program</StartAction>
+    <StartProgram>$(VALHEIM_INSTALL)\valheim.exe</StartProgram>
+    <StartArguments>-console</StartArguments>
+    <StartWorkingDirectory>$(VALHEIM_INSTALL)</StartWorkingDirectory>
+  </PropertyGroup>
+
+  <!-- BepInEx + Harmony (no Jotunn) -->
+  <ItemGroup>
+    <Reference Include="BepInEx">
+      <HintPath>$(VALHEIM_INSTALL)\BepInEx\core\BepInEx.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(VALHEIM_INSTALL)\BepInEx\core\0Harmony.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Valheim assemblies -->
+  <ItemGroup>
+    <Reference Include="assembly_valheim">
+      <HintPath>$(VALHEIM_INSTALL)\valheim_Data\Managed\assembly_valheim.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="assembly_utils">
+      <HintPath>$(VALHEIM_INSTALL)\valheim_Data\Managed\assembly_utils.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Unity -->
+  <ItemGroup>
+    <Reference Include="UnityEngine">
+      <HintPath>$(VALHEIM_INSTALL)\valheim_Data\Managed\UnityEngine.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(VALHEIM_INSTALL)\valheim_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(VALHEIM_INSTALL)\valheim_Data\Managed\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>$(VALHEIM_INSTALL)\valheim_Data\Managed\UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AssetBundleModule">
+      <HintPath>$(VALHEIM_INSTALL)\valheim_Data\Managed\UnityEngine.AssetBundleModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- System -->
+  <ItemGroup>
+    <Reference Include="mscorlib" />
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+  </ItemGroup>
+
+  <!-- Source files -->
+  <ItemGroup>
+    <Compile Include="Terraform.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Configs\ModConfiguration.cs" />
+    <Compile Include="Patches\ZNetSceneAwakePatch.cs" />
+    <Compile Include="Patches\CharacterUnderWorldCheckPatch.cs" />
+    <Compile Include="Patches\HolePunchSystem.cs" />
+    <Compile Include="Patches\Types\ChunkRenderData.cs" />
+    <Compile Include="Patches\Types\DigMode.cs" />
+    <Compile Include="Patches\Types\DigRecord.cs" />
+    <Compile Include="Patches\Types\RenderFootprint.cs" />
+    <Compile Include="Manager\TerraformManager.cs" />
+    <Compile Include="Manager\TerraformManager.Reflection.cs" />
+    <Compile Include="Manager\TerraformManager.Lifecycle.cs" />
+    <Compile Include="Manager\TerraformManager.Underground.cs" />
+    <Compile Include="Manager\TerraformManager.Input.cs" />
+    <Compile Include="Manager\TerraformManager.Dig.cs" />
+    <Compile Include="Manager\TerraformManager.HeightmapPunch.cs" />
+    <Compile Include="Manager\TerraformManager.Mesh.cs" />
+    <Compile Include="Manager\TerraformManager.SurfaceOverlay.cs" />
+    <Compile Include="Manager\TerraformManager.Material.cs" />
+    <Compile Include="Manager\TerraformManager.Debug.cs" />
+    <Compile Include="Voxel\Core\Voxel.cs" />
+    <Compile Include="Voxel\Core\VoxelChunk.cs" />
+    <Compile Include="Voxel\Meshing\MeshData.cs" />
+    <Compile Include="Voxel\Meshing\MarchingCubesTables.cs" />
+    <Compile Include="Voxel\Meshing\MarchingCubesMesher.cs" />
+  </ItemGroup>
+
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+
+  <!-- Post-build: copy DLL to Valheim plugins folder -->
+  <Target Name="PostBuildDeploy" AfterTargets="Build" Condition="'$(OS)' == 'Windows_NT'">
+    <Exec Command="powershell.exe -ExecutionPolicy RemoteSigned -File &quot;$(SolutionDir)publish.ps1&quot; -Target &quot;$(ConfigurationName)&quot; -TargetPath &quot;$(TargetDir.TrimEnd('\'))&quot; -TargetAssembly &quot;$(TargetFileName)&quot; -ValheimPath &quot;$(VALHEIM_INSTALL.TrimEnd('\'))&quot; -DeployPath &quot;$(MOD_DEPLOYPATH.TrimEnd('\'))&quot; -ProjectPath &quot;$(ProjectDir.TrimEnd('\'))&quot;" />
+  </Target>
+
+  <Target Name="EnsureEnvironmentProps" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(SolutionDir)Environment.props')" Text="Missing Environment.props — copy from Environment.props.example and set your VALHEIM_INSTALL path." />
+  </Target>
+</Project>
