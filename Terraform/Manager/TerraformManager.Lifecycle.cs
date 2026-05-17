@@ -87,6 +87,8 @@ public partial class TerraformManager {
 
             RebuildChunkFromHistory(data);
         }
+
+        ScanWaterVolumes();
     }
 
     private static void ResetChunkDigState(ChunkRenderData data) {

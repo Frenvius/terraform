@@ -100,6 +100,9 @@ public partial class TerraformManager {
             RebuildMesh(data);
             if (swMesh != null) meshTicks += swMesh.ElapsedTicks;
 
+            if (_waters.TryGetValue(kv.Key, out var waterData))
+                RebuildWaterMeshFromHistory(waterData);
+
             DebugLog(
                 $"Dig world=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) " +
                 $"mode={mode} terrainH={data.TerrainHeight:F1} " +

@@ -49,6 +49,7 @@ public partial class TerraformManager : MonoBehaviour {
     private void Awake() {
         Instance         = this;
         _chunks          = new Dictionary<int, ChunkRenderData>();
+        _waters          = new Dictionary<int, WaterRenderData>();
         _debugGrids      = new Dictionary<int, GameObject>();
         _debugChunkWalls = new Dictionary<int, GameObject>();
     }
