@@ -76,6 +76,7 @@ public partial class TerraformManager {
         var swTotal = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
         int chunkHit = 0;
         long carveTicks = 0, meshTicks = 0;
+        InvalidateWaterMasks();
         foreach (var kv in _chunks) {
             var data = kv.Value;
             if (data == null || data.MeshObject == null || data.Heightmap == null) continue;
@@ -100,14 +101,13 @@ public partial class TerraformManager {
             RebuildMesh(data);
             if (swMesh != null) meshTicks += swMesh.ElapsedTicks;
 
-            if (_waters.TryGetValue(kv.Key, out var waterData))
-                RebuildWaterMeshFromHistory(waterData);
-
             DebugLog(
                 $"Dig world=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) " +
                 $"mode={mode} terrainH={data.TerrainHeight:F1} " +
                 $"history={digs.Count}");
         }
+
+        RebuildAllWaterMeshes();
 
         if (chunkHit == 0)
             TerraformPlugin.Log.LogWarning(
