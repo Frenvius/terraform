@@ -10,6 +10,7 @@ public static class WaterVolume_GetWaterSurface_Patch {
     static bool Prefix(Vector3 point, ref float __result) {
         if (TerraformManager.Instance == null) return true;
         if (!TerraformManager.Instance.IsPlayerInVoxelCavity(point)) return true;
+        if (TerraformManager.Instance.IsWaterReachableAtPosition(point)) return true;
         __result = NoWaterSentinel;
         return false;
     }
