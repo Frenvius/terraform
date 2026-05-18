@@ -134,7 +134,6 @@ public partial class TerraformManager {
             wcMinX_world, wcMaxX_world, wcMinZ_world, wcMaxZ_world, worldPos, outerRadius);
 
         foreach (var hm in allHms) {
-            bool hmIsLod = hm.gameObject.name.Contains("lodMesh");
             float halfSize = hm.m_width * hm.m_scale * 0.5f;
             Vector3 hmPos  = hm.transform.position;
             bool isSourceChunk =
@@ -144,29 +143,12 @@ public partial class TerraformManager {
             if (Mathf.Abs(worldPos.x - hmPos.x) > halfSize + thisPaintRadius) continue;
             if (Mathf.Abs(worldPos.z - hmPos.z) > halfSize + thisPaintRadius) continue;
 
-            float hmCellOriginX = hmPos.x - halfSize;
-            float hmCellOriginZ = hmPos.z - halfSize;
-            int cellMinX = Mathf.FloorToInt((wcMinX_world - hmCellOriginX) / hm.m_scale);
-            int cellMaxX = Mathf.FloorToInt((wcMaxX_world - hmCellOriginX) / hm.m_scale);
-            int cellMinZ = Mathf.FloorToInt((wcMinZ_world - hmCellOriginZ) / hm.m_scale);
-            int cellMaxZ = Mathf.FloorToInt((wcMaxZ_world - hmCellOriginZ) / hm.m_scale);
+            int punchedHere = PunchHolesOnHeightmap(
+                hm, worldPos, maxCeilingDelta,
+                punchedMask, wcMinX_world, wcMinZ_world,
+                wcMaxX_world, wcMaxZ_world);
 
-            int punchedHere = 0;
-            for (int z = cellMinZ; z <= cellMaxZ; z++)
-            for (int x = cellMinX; x <= cellMaxX; x++) {
-                if (x < 0 || z < 0 || x >= hm.m_width || z >= hm.m_width) continue;
-
-                if (!hmIsLod) {
-                    int wcX = Mathf.FloorToInt(hmCellOriginX + x * hm.m_scale);
-                    int wcZ = Mathf.FloorToInt(hmCellOriginZ + z * hm.m_scale);
-                    if (!IsMaskedCellPunched(punchedMask, wcMinX_world, wcMinZ_world, wcX, wcZ)) continue;
-                    if (!CellNeedsPunch(hm, wcX, wcZ, worldPos.y, maxCeilingDelta, hmPos.y)) continue;
-                }
-
-                HolePunchSystem.PunchHole(hm, x, z);
-                punchedHere++;
-            }
-
+            bool hmIsLod = hm.gameObject.name.Contains("lodMesh");
             bool didSomethingHere = punchedHere > 0;
             if (!hmIsLod && punchedHere > 0) {
                 var tc = hm.GetAndCreateTerrainCompiler();
@@ -193,5 +175,85 @@ public partial class TerraformManager {
         }
 
         DebugLog($"PunchHoles: {totalPunched} cells across hms @ {worldPos}");
+    }
+
+    private static int PunchHolesOnHeightmap(
+        Heightmap hm,
+        Vector3 worldPos,
+        float maxCeilingDelta,
+        bool[,] punchedMask,
+        int wcMinX_world,
+        int wcMinZ_world,
+        int wcMaxX_world,
+        int wcMaxZ_world) {
+
+        bool hmIsLod = hm.gameObject.name.Contains("lodMesh");
+        float halfSize = hm.m_width * hm.m_scale * 0.5f;
+        Vector3 hmPos  = hm.transform.position;
+        float hmCellOriginX = hmPos.x - halfSize;
+        float hmCellOriginZ = hmPos.z - halfSize;
+        int cellMinX = Mathf.FloorToInt((wcMinX_world - hmCellOriginX) / hm.m_scale);
+        int cellMaxX = Mathf.FloorToInt((wcMaxX_world - hmCellOriginX) / hm.m_scale);
+        int cellMinZ = Mathf.FloorToInt((wcMinZ_world - hmCellOriginZ) / hm.m_scale);
+        int cellMaxZ = Mathf.FloorToInt((wcMaxZ_world - hmCellOriginZ) / hm.m_scale);
+
+        int punchedHere = 0;
+        for (int z = cellMinZ; z <= cellMaxZ; z++)
+        for (int x = cellMinX; x <= cellMaxX; x++) {
+            if (x < 0 || z < 0 || x >= hm.m_width || z >= hm.m_width) continue;
+
+            if (!hmIsLod) {
+                int wcX = Mathf.FloorToInt(hmCellOriginX + x * hm.m_scale);
+                int wcZ = Mathf.FloorToInt(hmCellOriginZ + z * hm.m_scale);
+                if (!IsMaskedCellPunched(punchedMask, wcMinX_world, wcMinZ_world, wcX, wcZ)) continue;
+                if (!CellNeedsPunch(hm, wcX, wcZ, worldPos.y, maxCeilingDelta, hmPos.y)) continue;
+            }
+
+            HolePunchSystem.PunchHole(hm, x, z);
+            punchedHere++;
+        }
+
+        return punchedHere;
+    }
+
+    public void ReplayDigPunchesOnHeightmap(Heightmap hm, System.Collections.Generic.List<DigRecord> digs) {
+        if (hm == null || digs == null || digs.Count == 0) return;
+        if (hm.gameObject.name.Contains("lodMesh")) return;
+
+        float halfSize = hm.m_width * hm.m_scale * 0.5f;
+        Vector3 hmPos  = hm.transform.position;
+        int totalPunched = 0;
+
+        foreach (var dig in digs) {
+            DeriveModePunchParams(dig.Mode, dig.Radius, out float outerRadius, out float maxCeilingDelta);
+
+            if (Mathf.Abs(dig.WorldPos.x - hmPos.x) > halfSize + outerRadius) continue;
+            if (Mathf.Abs(dig.WorldPos.z - hmPos.z) > halfSize + outerRadius) continue;
+
+            int wcMinX = Mathf.FloorToInt(dig.WorldPos.x - outerRadius);
+            int wcMaxX = Mathf.FloorToInt(dig.WorldPos.x + outerRadius);
+            int wcMinZ = Mathf.FloorToInt(dig.WorldPos.z - outerRadius);
+            int wcMaxZ = Mathf.FloorToInt(dig.WorldPos.z + outerRadius);
+            var mask = BuildPunchedCellMask(wcMinX, wcMaxX, wcMinZ, wcMaxZ, dig.WorldPos, outerRadius);
+
+            totalPunched += PunchHolesOnHeightmap(
+                hm, dig.WorldPos, maxCeilingDelta, mask, wcMinX, wcMinZ, wcMaxX, wcMaxZ);
+        }
+
+        if (totalPunched > 0) {
+            hm.Poke(false);
+            DebugLog($"[replay-punch] hm={hm.gameObject.name} digs={digs.Count} punched={totalPunched}");
+        }
+    }
+
+    private static void DeriveModePunchParams(DigMode mode, float radius, out float outerRadius, out float maxCeilingDelta) {
+        if (mode == DigMode.Surface) {
+            outerRadius     = radius * OuterRadiusMultiplier + ExtendedPunchBleed;
+            maxCeilingDelta = SurfacePunchMaxDelta(radius);
+        } else {
+            float pickaxeOuterRadius = PickaxeRadius + PickaxeNoiseAmplitude;
+            outerRadius     = pickaxeOuterRadius;
+            maxCeilingDelta = pickaxeOuterRadius * PickaxeHeightMultiplier;
+        }
     }
 }

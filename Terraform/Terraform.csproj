@@ -103,6 +103,7 @@
     <Compile Include="Configs\ModConfiguration.cs" />
     <Compile Include="Patches\ZNetSceneAwakePatch.cs" />
     <Compile Include="Patches\CharacterUnderWorldCheckPatch.cs" />
+    <Compile Include="Patches\GameFindSpawnPointPatch.cs" />
     <Compile Include="Patches\HolePunchSystem.cs" />
     <Compile Include="Patches\WaterVolumeWaterSurfacePatch.cs" />
     <Compile Include="Patches\Types\ChunkRenderData.cs" />
@@ -125,6 +126,7 @@
     <Compile Include="Manager\TerraformManager.WaterPunch.cs" />
     <Compile Include="Manager\TerraformManager.WaterLeak.cs" />
     <Compile Include="Manager\TerraformManager.WaterLeakDebug.cs" />
+    <Compile Include="Persistence\TerraformPersistence.cs" />
     <Compile Include="Assets\WaterfallAssets.cs" />
     <Compile Include="Assets\UVScroller.cs" />
     <EmbeddedResource Include="Resources\terraform_waterfall" Condition="Exists('Resources\terraform_waterfall')">

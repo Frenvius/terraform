@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using Terraform.Persistence;
 
 namespace Terraform.Patches;
 
@@ -7,7 +8,9 @@ public partial class TerraformManager : MonoBehaviour {
     public static TerraformManager Instance;
 
     private Dictionary<int, ChunkRenderData> _chunks;
-    private readonly Dictionary<long, List<DigRecord>> _chunkDigHistory = new();
+    private Dictionary<long, List<DigRecord>> _chunkDigHistory = new();
+    private bool _persistenceLoaded;
+    private bool _saveSubscribed;
     private float _scanTimer;
     private const float ScanInterval = 1f;
     private const float UndergroundEnterMarginY = 1.0f;
@@ -60,6 +63,9 @@ public partial class TerraformManager : MonoBehaviour {
         ((int)(key >> 32), (int)((key >> 16) & 0xFFFFL), (short)(key & 0xFFFFL));
 
     private void Awake() {
+        if (Instance != null && Instance != this) {
+            Destroy(Instance.gameObject);
+        }
         Instance         = this;
         _chunks          = new Dictionary<int, ChunkRenderData>();
         _waters          = new Dictionary<int, WaterRenderData>();
@@ -69,7 +75,34 @@ public partial class TerraformManager : MonoBehaviour {
 
     private void OnDestroy() {
         DestroyAllWaterLeaks();
+        UnsubscribeWorldSave();
         if (Instance == this) Instance = null;
+    }
+
+    private void TryLoadPersistence() {
+        if (_persistenceLoaded) return;
+        if (ZNet.instance == null) return;
+        if (string.IsNullOrEmpty(ZNet.instance.GetWorldName())) return;
+
+        var loaded = TerraformPersistence.Load();
+        if (loaded != null) _chunkDigHistory = loaded;
+        _persistenceLoaded = true;
+    }
+
+    private void TrySubscribeWorldSave() {
+        if (_saveSubscribed) return;
+        ZNet.WorldSaveStarted += OnWorldSaveStarted;
+        _saveSubscribed = true;
+    }
+
+    private void UnsubscribeWorldSave() {
+        if (!_saveSubscribed) return;
+        ZNet.WorldSaveStarted -= OnWorldSaveStarted;
+        _saveSubscribed = false;
+    }
+
+    private void OnWorldSaveStarted() {
+        TerraformPersistence.Save(_chunkDigHistory);
     }
 
     public bool IsPlayerInVoxelCavity(Vector3 worldPos) {
@@ -79,12 +112,48 @@ public partial class TerraformManager : MonoBehaviour {
         if (!Heightmap.GetHeight(worldPos, out float terrainY)) return false;
         if (worldPos.y >= terrainY - UndergroundEnterMarginY) return false;
 
-        return _chunks.TryGetValue(hm.GetInstanceID(), out var data)
+        if (_chunks.TryGetValue(hm.GetInstanceID(), out var data)
             && data.Renderer != null
-            && data.Renderer.enabled;
+            && data.Renderer.enabled)
+            return true;
+
+        return IsPositionInKnownDig(worldPos);
+    }
+
+    private const float KnownDigXZSearchRadius = 4f;
+    private const float KnownDigYSearchRadius  = 24f;
+
+    public bool HasDigNearXZ(float worldX, float worldZ, float searchRadius = KnownDigXZSearchRadius) {
+        float r2 = searchRadius * searchRadius;
+        foreach (var list in _chunkDigHistory.Values) {
+            for (int i = 0; i < list.Count; i++) {
+                float dx = list[i].WorldPos.x - worldX;
+                float dz = list[i].WorldPos.z - worldZ;
+                if (dx * dx + dz * dz < r2) return true;
+            }
+        }
+        return false;
+    }
+
+    public bool IsPositionInKnownDig(Vector3 worldPos) {
+        float xzR2 = KnownDigXZSearchRadius * KnownDigXZSearchRadius;
+        foreach (var list in _chunkDigHistory.Values) {
+            for (int i = 0; i < list.Count; i++) {
+                var d = list[i];
+                float dx = d.WorldPos.x - worldPos.x;
+                float dz = d.WorldPos.z - worldPos.z;
+                if (dx * dx + dz * dz >= xzR2) continue;
+                if (Mathf.Abs(d.WorldPos.y - worldPos.y) > KnownDigYSearchRadius) continue;
+                return true;
+            }
+        }
+        return false;
     }
 
     private void Update() {
+        TryLoadPersistence();
+        TrySubscribeWorldSave();
+
         _scanTimer += Time.deltaTime;
         if (_scanTimer >= ScanInterval) {
             _scanTimer = 0f;

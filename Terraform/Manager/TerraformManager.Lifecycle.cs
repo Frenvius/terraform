@@ -118,6 +118,7 @@ public partial class TerraformManager {
             replayed++;
         }
         if (replayed > 0) {
+            ReplayDigPunchesOnHeightmap(data.Heightmap, digs);
             RebuildMesh(data);
             DebugLog($"  replayed {replayed} digs onto new chunk");
         } else {
