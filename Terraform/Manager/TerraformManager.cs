@@ -34,6 +34,12 @@ public partial class TerraformManager : MonoBehaviour {
     private const float ExtendedPunchBleed     = 2f;
     private const float CrossChunkPaintBleed   = 1.5f;
 
+    private const int FloorSentinelLayers = 1;
+    private const int GlobalBedrockY     = 0;
+
+    private static int ProtectedYLocalExclusive(int chunkOriginY) =>
+        Mathf.Max(FloorSentinelLayers, GlobalBedrockY + 1 - chunkOriginY);
+
     private static bool VerboseLogs =>
         Configs.ModConfig.DebugMode != null && Configs.ModConfig.DebugMode.Value;
 

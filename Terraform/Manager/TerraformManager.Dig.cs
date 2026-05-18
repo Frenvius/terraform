@@ -219,7 +219,7 @@ public partial class TerraformManager {
                 int yMinWorld = Mathf.FloorToInt(bowlFloorYWorld) - 1;
                 int yMaxWorld = chunkOriginY + VoxelChunk.SIZE;
 
-                int yMinLocal = Mathf.Max(0, yMinWorld - chunkOriginY);
+                int yMinLocal = Mathf.Max(ProtectedYLocalExclusive(chunkOriginY), yMinWorld - chunkOriginY);
                 int yMaxLocal = Mathf.Min(VoxelChunk.SIZE, yMaxWorld - chunkOriginY);
 
                 for (int yLocal = yMinLocal; yLocal <= yMaxLocal; yLocal++) {
@@ -254,6 +254,7 @@ public partial class TerraformManager {
         int chunkOriginX = Mathf.RoundToInt(origin.x);
         int chunkOriginY = Mathf.RoundToInt(origin.y);
         int chunkOriginZ = Mathf.RoundToInt(origin.z);
+        int yFloor       = ProtectedYLocalExclusive(chunkOriginY);
 
         float maxRadius  = PickaxeRadius + PickaxeNoiseAmplitude;
         float maxRadiusY = maxRadius * PickaxeHeightMultiplier;
@@ -278,7 +279,7 @@ public partial class TerraformManager {
             int vx = worldVx - chunkOriginX;
             int vy = worldVy - chunkOriginY;
             int vz = worldVz - chunkOriginZ;
-            if (vx < 0 || vx > VoxelChunk.SIZE || vy < 0 || vy > VoxelChunk.SIZE || vz < 0 || vz > VoxelChunk.SIZE) {
+            if (vx < 0 || vx > VoxelChunk.SIZE || vy < yFloor || vy > VoxelChunk.SIZE || vz < 0 || vz > VoxelChunk.SIZE) {
                 cornersOutOfChunk++;
                 continue;
             }
@@ -363,7 +364,7 @@ public partial class TerraformManager {
 
             int yMinWorld = Mathf.FloorToInt(terrainY) - 2;
             int yMaxWorld = chunkOriginY + VoxelChunk.SIZE;
-            int yMinLocal = Mathf.Max(0, yMinWorld - chunkOriginY);
+            int yMinLocal = Mathf.Max(ProtectedYLocalExclusive(chunkOriginY), yMinWorld - chunkOriginY);
             int yMaxLocal = Mathf.Min(VoxelChunk.SIZE, yMaxWorld - chunkOriginY);
 
             for (int yLocal = yMinLocal; yLocal <= yMaxLocal; yLocal++) {
