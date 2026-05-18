@@ -83,6 +83,10 @@
       <HintPath>$(VALHEIM_INSTALL)\valheim_Data\Managed\UnityEngine.AssetBundleModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="UnityEngine.AudioModule">
+      <HintPath>$(VALHEIM_INSTALL)\valheim_Data\Managed\UnityEngine.AudioModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
   </ItemGroup>
 
   <!-- System -->
@@ -119,6 +123,13 @@
     <Compile Include="Manager\TerraformManager.Debug.cs" />
     <Compile Include="Manager\TerraformManager.Water.cs" />
     <Compile Include="Manager\TerraformManager.WaterPunch.cs" />
+    <Compile Include="Manager\TerraformManager.WaterLeak.cs" />
+    <Compile Include="Manager\TerraformManager.WaterLeakDebug.cs" />
+    <Compile Include="Assets\WaterfallAssets.cs" />
+    <Compile Include="Assets\UVScroller.cs" />
+    <EmbeddedResource Include="Resources\terraform_waterfall" Condition="Exists('Resources\terraform_waterfall')">
+      <LogicalName>Terraform.Resources.terraform_waterfall</LogicalName>
+    </EmbeddedResource>
     <Compile Include="Voxel\Core\Voxel.cs" />
     <Compile Include="Voxel\Core\VoxelChunk.cs" />
     <Compile Include="Voxel\Meshing\MeshData.cs" />

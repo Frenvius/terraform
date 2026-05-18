@@ -6,7 +6,6 @@ namespace Terraform.Patches;
 
 public partial class TerraformManager {
     private void ScanHeightmaps() {
-        InvalidateWaterMasks();
         List<int> dead = null;
         foreach (var kv in _chunks) {
             var d = kv.Value;
@@ -90,6 +89,7 @@ public partial class TerraformManager {
         }
 
         ScanWaterVolumes();
+        RefreshWaterLeaks();
     }
 
     private static void ResetChunkDigState(ChunkRenderData data) {

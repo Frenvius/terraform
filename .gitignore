@@ -75,3 +75,9 @@ $RECYCLE.BIN/
 *.tmp
 *.swp
 *~
+
+# Unity project
+TerraformUnity/
+
+# Asset bundle is built locally — not committed
+Terraform/Resources/Resources*

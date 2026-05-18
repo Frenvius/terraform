@@ -26,9 +26,10 @@ public partial class TerraformManager : MonoBehaviour {
     private const float ShallowAboveKeep      = 0.35f;
     private const float MinCeilingThickness   = 1.0f;
 
-    private const float PickaxeRadius          = 1.1f;
-    private const float PickaxeNoiseFrequency  = 0.6f;
-    private const float PickaxeNoiseAmplitude  = 0.35f;
+    private const float PickaxeRadius           = 1.1f;
+    private const float PickaxeNoiseFrequency   = 0.6f;
+    private const float PickaxeNoiseAmplitude   = 0.35f;
+    private const float PickaxeHeightMultiplier = 1.5f;
 
     private const float ExtendedPunchBleed     = 2f;
     private const float CrossChunkPaintBleed   = 1.5f;
@@ -46,6 +47,12 @@ public partial class TerraformManager : MonoBehaviour {
     private static long ChunkKey(int chunkOriginX, int chunkOriginZ) =>
         ((long)chunkOriginX << 32) ^ (uint)chunkOriginZ;
 
+    private static long Cell3DKey(int worldX, int worldY, int worldZ) =>
+        ((long)worldX << 32) | ((long)(ushort)worldY << 16) | (long)(ushort)(short)worldZ;
+
+    private static (int x, int y, int z) DecodeCell3DKey(long key) =>
+        ((int)(key >> 32), (int)((key >> 16) & 0xFFFFL), (short)(key & 0xFFFFL));
+
     private void Awake() {
         Instance         = this;
         _chunks          = new Dictionary<int, ChunkRenderData>();
@@ -55,6 +62,7 @@ public partial class TerraformManager : MonoBehaviour {
     }
 
     private void OnDestroy() {
+        DestroyAllWaterLeaks();
         if (Instance == this) Instance = null;
     }
 

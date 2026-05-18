@@ -27,6 +27,14 @@ public partial class TerraformManager {
             if (Input.GetKeyDown(KeyCode.F12)) {
                 InspectTriangleAtCrosshair();
             }
+
+            if (Input.GetKeyDown(KeyCode.F6)) {
+                ToggleLeakDebug();
+            }
+
+            if (Input.GetKeyDown(KeyCode.F4)) {
+                ToggleHideWater();
+            }
         }
 
         if (!Input.GetKeyDown(KeyCode.F8)) return;
@@ -59,7 +67,8 @@ public partial class TerraformManager {
             PunchHoles(hm, hit.point, surfacePunchRadius, surfaceOuterRadius, SurfacePunchMaxDelta(radius));
         } else {
             float pickaxeOuterRadius = PickaxeRadius + PickaxeNoiseAmplitude;
-            PunchHoles(hm, hit.point, pickaxeOuterRadius, pickaxeOuterRadius, pickaxeOuterRadius);
+            float pickaxeReachY      = pickaxeOuterRadius * PickaxeHeightMultiplier;
+            PunchHoles(hm, hit.point, pickaxeOuterRadius, pickaxeOuterRadius, pickaxeReachY);
         }
         Dig(hit.point, radius, mode);
 
