@@ -104,6 +104,7 @@
     <Compile Include="Patches\ZNetSceneAwakePatch.cs" />
     <Compile Include="Patches\CharacterUnderWorldCheckPatch.cs" />
     <Compile Include="Patches\GameFindSpawnPointPatch.cs" />
+    <Compile Include="Patches\ZoneSystemGroundHeightPatch.cs" />
     <Compile Include="Patches\HolePunchSystem.cs" />
     <Compile Include="Patches\WaterVolumeWaterSurfacePatch.cs" />
     <Compile Include="Patches\Types\ChunkRenderData.cs" />
