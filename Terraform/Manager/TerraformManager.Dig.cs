@@ -106,6 +106,8 @@ public partial class TerraformManager {
                 $"history={digs.Count}");
         }
 
+        RebuildAllWaterMeshes();
+
         if (chunkHit == 0)
             TerraformPlugin.Log.LogWarning(
                 $"Dig: no chunk overlapping {worldPos} (total chunks={_chunks.Count})");
@@ -253,13 +255,14 @@ public partial class TerraformManager {
         int chunkOriginY = Mathf.RoundToInt(origin.y);
         int chunkOriginZ = Mathf.RoundToInt(origin.z);
 
-        float maxRadius = PickaxeRadius + PickaxeNoiseAmplitude;
-        int worldVxMin = Mathf.FloorToInt(worldPos.x - maxRadius) - 1;
-        int worldVxMax = Mathf.CeilToInt(worldPos.x + maxRadius) + 1;
-        int worldVyMin = Mathf.FloorToInt(worldPos.y - maxRadius) - 1;
-        int worldVyMax = Mathf.CeilToInt(worldPos.y + maxRadius) + 1;
-        int worldVzMin = Mathf.FloorToInt(worldPos.z - maxRadius) - 1;
-        int worldVzMax = Mathf.CeilToInt(worldPos.z + maxRadius) + 1;
+        float maxRadius  = PickaxeRadius + PickaxeNoiseAmplitude;
+        float maxRadiusY = maxRadius * PickaxeHeightMultiplier;
+        int worldVxMin = Mathf.FloorToInt(worldPos.x - maxRadius)  - 1;
+        int worldVxMax = Mathf.CeilToInt (worldPos.x + maxRadius)  + 1;
+        int worldVyMin = Mathf.FloorToInt(worldPos.y - maxRadiusY) - 1;
+        int worldVyMax = Mathf.CeilToInt (worldPos.y + maxRadiusY) + 1;
+        int worldVzMin = Mathf.FloorToInt(worldPos.z - maxRadius)  - 1;
+        int worldVzMax = Mathf.CeilToInt (worldPos.z + maxRadius)  + 1;
 
         int worldCellMinX = Mathf.FloorToInt(worldPos.x - maxRadius);
         int worldCellMaxX = Mathf.FloorToInt(worldPos.x + maxRadius);
@@ -281,7 +284,7 @@ public partial class TerraformManager {
             }
 
             float dx = worldVx - worldPos.x;
-            float dy = worldVy - worldPos.y;
+            float dy = (worldVy - worldPos.y) / PickaxeHeightMultiplier;
             float dz = worldVz - worldPos.z;
             float dist = Mathf.Sqrt(dx * dx + dy * dy + dz * dz);
 
