@@ -168,14 +168,13 @@ public partial class TerraformManager {
             }
 
             bool didSomethingHere = punchedHere > 0;
-            if (!hmIsLod) {
+            if (!hmIsLod && punchedHere > 0) {
                 var tc = hm.GetAndCreateTerrainCompiler();
                 if (tc != null && _tcPaintClearedMethod != null) {
                     _tcPaintClearedMethod.Invoke(tc, new object[] {
                         worldPos, thisPaintRadius, TerrainModifier.PaintType.Dirt, false, false
                     });
                     _saveMethod?.Invoke(tc, null);
-                    didSomethingHere = true;
                 }
             }
 
