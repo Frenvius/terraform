@@ -68,8 +68,13 @@ public static class HolePunchSystem {
         if (Terraform.Configs.ModConfig.DebugMode != null && Terraform.Configs.ModConfig.DebugMode.Value) {
             int holeCount = 0;
             foreach (var _ in holes) holeCount++;
+            float minX = float.MaxValue, maxX = float.MinValue;
+            for (int v = 0; v < verts.Length; v++) {
+                if (verts[v].x < minX) minX = verts[v].x;
+                if (verts[v].x > maxX) maxX = verts[v].x;
+            }
             TerraformPlugin.Log.LogInfo(
-                $"[punch-filter] hm={hm.gameObject.name} mesh={mesh.name} holes={holeCount} dropped={dropped} kept={kept}");
+                $"[punch-filter] hm={hm.gameObject.name} mesh={mesh.name} holes={holeCount} dropped={dropped} kept={kept} vertX=[{minX:F1},{maxX:F1}]");
         }
     }
 }

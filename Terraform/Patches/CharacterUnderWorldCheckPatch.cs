@@ -7,7 +7,7 @@ public static class Character_UnderWorldCheck_Patch {
     static bool Prefix(Character __instance) {
         if (__instance != Player.m_localPlayer) return true;
         if (TerraformManager.Instance == null) return true;
-        if (!TerraformManager.Instance.IsPlayerInVoxelCavity(__instance.transform.position)) return true;
+        if (!TerraformManager.Instance.ShouldSuppressPlayerUnderWorldCheck(__instance.transform.position)) return true;
         return false;
     }
 }

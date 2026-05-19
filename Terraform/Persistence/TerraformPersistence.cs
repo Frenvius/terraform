@@ -8,7 +8,7 @@ namespace Terraform.Persistence;
 
 public static class TerraformPersistence {
     private const int Magic   = 0x4D465254;
-    private const int Version = 1;
+    private const int Version = 2;
 
     private static string ResolveSavePath() {
         var worldField = AccessTools.Field(typeof(ZNet), "m_world");
@@ -51,8 +51,13 @@ public static class TerraformPersistence {
                 int recordCount = reader.ReadInt32();
                 var list = new List<DigRecord>(recordCount);
                 for (int j = 0; j < recordCount; j++) {
+                    Vector3 worldPos = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+                    Vector3 normal = version >= 2
+                        ? new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle())
+                        : Vector3.up;
                     var rec = new DigRecord {
-                        WorldPos = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle()),
+                        WorldPos = worldPos,
+                        Normal   = normal,
                         Radius   = reader.ReadSingle(),
                         Mode     = (DigMode)reader.ReadInt32(),
                     };
@@ -95,6 +100,10 @@ public static class TerraformPersistence {
                         writer.Write(rec.WorldPos.x);
                         writer.Write(rec.WorldPos.y);
                         writer.Write(rec.WorldPos.z);
+                        Vector3 normal = rec.Normal.sqrMagnitude > 0.001f ? rec.Normal.normalized : Vector3.up;
+                        writer.Write(normal.x);
+                        writer.Write(normal.y);
+                        writer.Write(normal.z);
                         writer.Write(rec.Radius);
                         writer.Write((int)rec.Mode);
                         totalRecords++;

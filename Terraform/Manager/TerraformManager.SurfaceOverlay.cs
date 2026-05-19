@@ -38,6 +38,7 @@ public partial class TerraformManager {
         CountSample(hm, centroid, ref intactSamples, ref punchedSamples);
 
         if (centroidState != CellState.Intact) return false;
+        if (punchedSamples > 0) return false;
         return intactSamples >= 5;
     }
 

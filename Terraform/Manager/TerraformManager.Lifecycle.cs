@@ -115,7 +115,7 @@ public partial class TerraformManager {
 
         int replayed = 0;
         foreach (var dig in digs) {
-            CarveCrater(data, dig.WorldPos, dig.Radius, dig.Mode);
+            CarveCrater(data, dig.WorldPos, dig.Radius, dig.Mode, dig.Normal.sqrMagnitude > 0.001f ? dig.Normal : Vector3.up);
             replayed++;
         }
         if (replayed > 0) {

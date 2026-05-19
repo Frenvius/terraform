@@ -29,14 +29,15 @@ public partial class TerraformManager {
         int rangeX = worldCellMaxX - worldCellMinX + 1;
         int rangeZ = worldCellMaxZ - worldCellMinZ + 1;
         var mask = new bool[rangeX, rangeZ];
-        float outerRadiusSq = outerRadius * outerRadius;
+        float effectiveRadius = Mathf.Max(0f, outerRadius - 0.15f);
+        float outerRadiusSq = effectiveRadius * effectiveRadius;
 
         for (int z = 0; z < rangeZ; z++)
         for (int x = 0; x < rangeX; x++) {
             float cellCenterX = worldCellMinX + x + 0.5f;
             float cellCenterZ = worldCellMinZ + z + 0.5f;
-            float dx = cellCenterX - worldPos.x;
-            float dz = cellCenterZ - worldPos.z;
+            float dx = Mathf.Max(Mathf.Abs(cellCenterX - worldPos.x) - 0.5f, 0f);
+            float dz = Mathf.Max(Mathf.Abs(cellCenterZ - worldPos.z) - 0.5f, 0f);
             mask[x, z] = (dx * dx + dz * dz) <= outerRadiusSq;
         }
 
@@ -202,12 +203,10 @@ public partial class TerraformManager {
         for (int x = cellMinX; x <= cellMaxX; x++) {
             if (x < 0 || z < 0 || x >= hm.m_width || z >= hm.m_width) continue;
 
-            if (!hmIsLod) {
-                int wcX = Mathf.FloorToInt(hmCellOriginX + x * hm.m_scale);
-                int wcZ = Mathf.FloorToInt(hmCellOriginZ + z * hm.m_scale);
-                if (!IsMaskedCellPunched(punchedMask, wcMinX_world, wcMinZ_world, wcX, wcZ)) continue;
-                if (!CellNeedsPunch(hm, wcX, wcZ, worldPos.y, maxCeilingDelta, hmPos.y)) continue;
-            }
+            int wcX = Mathf.FloorToInt(hmCellOriginX + x * hm.m_scale);
+            int wcZ = Mathf.FloorToInt(hmCellOriginZ + z * hm.m_scale);
+            if (!IsMaskedCellPunched(punchedMask, wcMinX_world, wcMinZ_world, wcX, wcZ)) continue;
+            if (!hmIsLod && !CellNeedsPunch(hm, wcX, wcZ, worldPos.y, maxCeilingDelta, hmPos.y)) continue;
 
             HolePunchSystem.PunchHole(hm, x, z);
             punchedHere++;
@@ -250,6 +249,9 @@ public partial class TerraformManager {
         if (mode == DigMode.Surface) {
             outerRadius     = radius * OuterRadiusMultiplier + ExtendedPunchBleed;
             maxCeilingDelta = SurfacePunchMaxDelta(radius);
+        } else if (mode == DigMode.Raise) {
+            outerRadius     = radius * OuterRadiusMultiplier + ExtendedPunchBleed;
+            maxCeilingDelta = radius * (ShelfDepthMultiplier + BowlDepthMultiplier) + MinCeilingThickness;
         } else {
             float pickaxeOuterRadius = PickaxeRadius + PickaxeNoiseAmplitude;
             outerRadius     = pickaxeOuterRadius;

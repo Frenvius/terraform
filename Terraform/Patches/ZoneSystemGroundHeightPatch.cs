@@ -16,6 +16,7 @@ internal static class VoxelGroundProbe {
     public static int TerrainMask {
         get { Init(); return s_terrainMask; }
     }
+    public static int TerrainAndPieceMask => TerrainMask | PieceMask;
 
     private static void Init() {
         if (s_init) return;
@@ -24,10 +25,13 @@ internal static class VoxelGroundProbe {
         s_init        = true;
     }
 
+    public static bool IsVoxelHit(RaycastHit hit) {
+        return hit.collider != null && hit.collider.gameObject.name == VoxelMeshObjectName;
+    }
+
     public static float VoxelTopY(Vector3 originAt6000) {
         if (Physics.Raycast(originAt6000, Vector3.down, out var hit, 10000f, PieceMask)
-            && hit.collider != null
-            && hit.collider.gameObject.name == VoxelMeshObjectName) {
+            && IsVoxelHit(hit)) {
             return hit.point.y;
         }
         return float.NegativeInfinity;

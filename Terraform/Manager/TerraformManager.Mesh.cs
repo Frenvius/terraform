@@ -49,12 +49,21 @@ public partial class TerraformManager {
             if (aboveTerrain[i]) aboveTerrainCount++;
 
             float clampedY;
+            CellState heightmapState = CellState.Outside;
+            bool needsHeightmapState = Mathf.Abs(offset) < ShallowAboveKeep
+                || (offset < 0f && offset > -SeamSnapDepth)
+                || offset > 0f;
+            if (needsHeightmapState)
+                heightmapState = ClassifyPoint(data.Heightmap, new Vector3(worldXZ.x, terrainY, worldXZ.z));
+
             if (Mathf.Abs(offset) < ShallowAboveKeep) {
-                var heightmapState = ClassifyPoint(data.Heightmap,
-                    new Vector3(worldXZ.x, terrainY, worldXZ.z));
                 clampedY = heightmapState == CellState.Intact
                     ? localTerrainY - SeamInset
                     : localTerrainY;
+            } else if (offset < 0f && offset > -SeamSnapDepth && heightmapState == CellState.Punched) {
+                clampedY = localTerrainY;
+            } else if (offset > 0f && heightmapState == CellState.Punched) {
+                clampedY = v.Y;
             } else {
                 clampedY = Mathf.Min(v.Y, localTerrainY);
             }
@@ -84,11 +93,39 @@ public partial class TerraformManager {
         const int kMaxChimneySamples = 15;
         const float kNearSurfaceDepth = 0.18f;
         var chimneyDropSamples = new List<(int i0, int i1, int i2, bool in0, bool in1, bool in2)>(kMaxChimneySamples);
+        const float kAbsoluteMaxAboveTerrain = 15f;
+        const float kMaxTriangleYSpan = 20f;
         for (int t = 0; t + 2 < srcIndices.Count; t += 3) {
             int i0 = srcIndices[t], i1 = srcIndices[t + 1], i2 = srcIndices[t + 2];
+            Vector3 a = verts[i0], b = verts[i1], c = verts[i2];
+            float maxVertexAbove = Mathf.Max(offsetAboveTerrain[i0], Mathf.Max(offsetAboveTerrain[i1], offsetAboveTerrain[i2]));
+            float ySpan = Mathf.Max(a.y, Mathf.Max(b.y, c.y)) - Mathf.Min(a.y, Mathf.Min(b.y, c.y));
+            bool needsTerraformEditState = maxVertexAbove > kAbsoluteMaxAboveTerrain
+                || ySpan > kMaxTriangleYSpan
+                || (aboveTerrain[i0] && aboveTerrain[i1] && aboveTerrain[i2]
+                    && Mathf.Max(offsetAboveTerrain[i0], Mathf.Max(offsetAboveTerrain[i1], offsetAboveTerrain[i2])) > SeamSnapDepth);
+            bool overlapsFootprint = TriangleOverlapsRenderFootprint(data, origin, a, b, c);
+            bool isTerraformEdit = false;
+            if (needsTerraformEditState && overlapsFootprint) {
+                Vector3 centroid = (a + b + c) / 3f;
+                Vector3 worldCentroid = origin + centroid;
+                isTerraformEdit = ClassifyPoint(data.Heightmap, worldCentroid) == CellState.Punched;
+            }
+            if (maxVertexAbove > kAbsoluteMaxAboveTerrain && !isTerraformEdit) {
+                droppedChimney++;
+                if (chimneyDropSamples.Count < kMaxChimneySamples)
+                    chimneyDropSamples.Add((i0, i1, i2, false, false, false));
+                continue;
+            }
+            if (ySpan > kMaxTriangleYSpan && !isTerraformEdit) {
+                droppedChimney++;
+                if (chimneyDropSamples.Count < kMaxChimneySamples)
+                    chimneyDropSamples.Add((i0, i1, i2, false, false, false));
+                continue;
+            }
             if (aboveTerrain[i0] && aboveTerrain[i1] && aboveTerrain[i2]) {
                 float maxAbove = Mathf.Max(offsetAboveTerrain[i0], Mathf.Max(offsetAboveTerrain[i1], offsetAboveTerrain[i2]));
-                if (maxAbove > ShallowAboveKeep) {
+                if (maxAbove > SeamSnapDepth && !isTerraformEdit) {
                     droppedChimney++;
                     if (offsetAboveTerrain[i0] < 0.01f && offsetAboveTerrain[i1] < 0.01f && offsetAboveTerrain[i2] < 0.01f)
                         dropAboveTinyEps++;
@@ -98,8 +135,7 @@ public partial class TerraformManager {
                 }
                 keptRimRecovered++;
             }
-            Vector3 a = verts[i0], b = verts[i1], c = verts[i2];
-            if (!TriangleOverlapsRenderFootprint(data, origin, a, b, c)) {
+            if (!overlapsFootprint) {
                 droppedOutsideFootprint++;
                 if (chimneyDropSamples.Count < kMaxChimneySamples)
                     chimneyDropSamples.Add((i0, i1, i2, false, false, false));

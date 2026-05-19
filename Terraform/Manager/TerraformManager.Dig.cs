@@ -70,8 +70,12 @@ public partial class TerraformManager {
     }
 
     public void Dig(Vector3 worldPos, float radius, DigMode mode) {
+        Dig(worldPos, radius, mode, Vector3.up);
+    }
+
+    public void Dig(Vector3 worldPos, float radius, DigMode mode, Vector3 normal) {
         var record = new DigRecord {
-            WorldPos = worldPos, Radius = radius, Mode = mode
+            WorldPos = worldPos, Normal = normal.normalized, Radius = radius, Mode = mode
         };
         var swTotal = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
         int chunkHit = 0;
@@ -94,7 +98,7 @@ public partial class TerraformManager {
 
             chunkHit++;
             var swCarve = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
-            CarveCrater(data, worldPos, radius, mode);
+            CarveCrater(data, worldPos, radius, mode, record.Normal);
             if (swCarve != null) carveTicks += swCarve.ElapsedTicks;
             var swMesh = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
             RebuildMesh(data);
@@ -118,9 +122,11 @@ public partial class TerraformManager {
         }
     }
 
-    private void CarveCrater(ChunkRenderData data, Vector3 worldPos, float radius, DigMode mode) {
+    private void CarveCrater(ChunkRenderData data, Vector3 worldPos, float radius, DigMode mode, Vector3 normal) {
         if (mode == DigMode.Surface) {
             CarveSurfaceCrater(data, worldPos, radius);
+        } else if (mode == DigMode.Raise) {
+            CarveRaiseMound(data, worldPos, radius, normal);
         } else {
             CarvePickaxeSphere(data, worldPos);
         }
@@ -148,25 +154,20 @@ public partial class TerraformManager {
         int apronMaxX = Mathf.FloorToInt(worldPos.x + apronRadius);
         int apronMinZ = Mathf.FloorToInt(worldPos.z - apronRadius);
         int apronMaxZ = Mathf.FloorToInt(worldPos.z + apronRadius);
-        var apronMask = BuildPunchedCellMask(
-            apronMinX, apronMaxX, apronMinZ, apronMaxZ, worldPos, apronRadius);
-        MergePunchedMaskIntoCarvedCells(data, apronMask, apronMinX, apronMinZ);
-
         AddRenderFootprint(data, apronMinX, apronMaxX + 1, apronMinZ, apronMaxZ + 1);
 
         SeedHeightmapSdfApron(data, chunkOriginX, chunkOriginY, chunkOriginZ,
             apronMinX, apronMaxX, apronMinZ, apronMaxZ);
 
-        bool IsCellPunched(int worldX, int worldZ) {
-            return IsMaskedCellPunched(punchedMask, worldCellMinX, worldCellMinZ, worldX, worldZ)
-                || IsCarvedCell(data, worldX, worldZ);
+        bool IsCurrentCellPunched(int worldX, int worldZ) {
+            return IsMaskedCellPunched(punchedMask, worldCellMinX, worldCellMinZ, worldX, worldZ);
         }
 
         int boundaryCornersTouched = 0, interiorCornersTouched = 0, cornersOutOfChunk = 0;
 
         for (int worldCellZ = worldCellMinZ; worldCellZ <= worldCellMaxZ; worldCellZ++)
         for (int worldCellX = worldCellMinX; worldCellX <= worldCellMaxX; worldCellX++) {
-            if (!IsCellPunched(worldCellX, worldCellZ)) continue;
+            if (!IsCurrentCellPunched(worldCellX, worldCellZ)) continue;
 
             int chunkCellX = worldCellX - chunkOriginX;
             int chunkCellZ = worldCellZ - chunkOriginZ;
@@ -181,10 +182,10 @@ public partial class TerraformManager {
                 int worldVz = chunkOriginZ + vz;
 
                 bool allFour =
-                    IsCellPunched(worldVx,     worldVz)     &&
-                    IsCellPunched(worldVx - 1, worldVz)     &&
-                    IsCellPunched(worldVx,     worldVz - 1) &&
-                    IsCellPunched(worldVx - 1, worldVz - 1);
+                    IsCurrentCellPunched(worldVx,     worldVz)     &&
+                    IsCurrentCellPunched(worldVx - 1, worldVz)     &&
+                    IsCurrentCellPunched(worldVx,     worldVz - 1) &&
+                    IsCurrentCellPunched(worldVx - 1, worldVz - 1);
                 bool isBoundary = !allFour;
                 if (isBoundary) boundaryCornersTouched++;
                 else            interiorCornersTouched++;
@@ -241,6 +242,8 @@ public partial class TerraformManager {
             }
         }
 
+        MergePunchedMaskIntoCarvedCells(data, punchedMask, worldCellMinX, worldCellMinZ);
+
         string hmName = data.Heightmap != null ? data.Heightmap.gameObject.name : "?";
         DebugLog(
             $"[carve-surface] hm={hmName} dig=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) r={radius:F1} outerR={outerRadius:F1} " +
@@ -270,6 +273,9 @@ public partial class TerraformManager {
         int worldCellMinZ = Mathf.FloorToInt(worldPos.z - maxRadius);
         int worldCellMaxZ = Mathf.FloorToInt(worldPos.z + maxRadius);
         AddRenderFootprint(data, worldCellMinX, worldCellMaxX + 1, worldCellMinZ, worldCellMaxZ + 1);
+
+        SeedHeightmapSdfApron(data, chunkOriginX, chunkOriginY, chunkOriginZ,
+            worldCellMinX, worldCellMaxX, worldCellMinZ, worldCellMaxZ);
 
         int writes = 0, cornersOutOfChunk = 0, cornersOutsideSphere = 0;
 
@@ -373,9 +379,100 @@ public partial class TerraformManager {
                 if (sdf == 0f) sdf = 0.001f;
 
                 var v = data.Chunk.Get(vx, yLocal, vz);
-                if (sdf > v.Value)
+                bool isAtDefault = v.Value <= -1f + 1e-5f;
+                if (sdf > v.Value && isAtDefault)
                     data.Chunk.Set(vx, yLocal, vz, new Terraform.Voxel.Core.Voxel { Value = sdf });
             }
         }
+    }
+
+    private void CarveRaiseMound(ChunkRenderData data, Vector3 worldPos, float radius, Vector3 surfaceNormal) {
+        Vector3 origin = data.MeshObject.transform.position;
+        int chunkOriginX = Mathf.RoundToInt(origin.x);
+        int chunkOriginY = Mathf.RoundToInt(origin.y);
+        int chunkOriginZ = Mathf.RoundToInt(origin.z);
+
+        float outerRadius = radius * OuterRadiusMultiplier;
+        float verticalRadius = Mathf.Max(radius * 1.75f, radius + 0.75f);
+        float apronRadius = outerRadius + ExtendedPunchBleed;
+        Vector3 normal = surfaceNormal.sqrMagnitude > 0.001f ? surfaceNormal.normalized : Vector3.up;
+
+        int worldCellMinX = Mathf.FloorToInt(worldPos.x - outerRadius);
+        int worldCellMaxX = Mathf.FloorToInt(worldPos.x + outerRadius);
+        int worldCellMinZ = Mathf.FloorToInt(worldPos.z - outerRadius);
+        int worldCellMaxZ = Mathf.FloorToInt(worldPos.z + outerRadius);
+        var punchedMask = BuildPunchedCellMask(
+            worldCellMinX, worldCellMaxX, worldCellMinZ, worldCellMaxZ, worldPos, outerRadius);
+
+        int apronMinX = Mathf.FloorToInt(worldPos.x - apronRadius);
+        int apronMaxX = Mathf.FloorToInt(worldPos.x + apronRadius);
+        int apronMinZ = Mathf.FloorToInt(worldPos.z - apronRadius);
+        int apronMaxZ = Mathf.FloorToInt(worldPos.z + apronRadius);
+        AddRenderFootprint(data, apronMinX, apronMaxX + 1, apronMinZ, apronMaxZ + 1);
+
+        SeedHeightmapSdfApron(data, chunkOriginX, chunkOriginY, chunkOriginZ,
+            apronMinX, apronMaxX, apronMinZ, apronMaxZ);
+
+        bool IsCurrentCellPunched(int worldX, int worldZ) {
+            return IsMaskedCellPunched(punchedMask, worldCellMinX, worldCellMinZ, worldX, worldZ);
+        }
+
+        int touchedCorners = 0, outOfChunk = 0;
+
+        for (int worldCellZ = worldCellMinZ; worldCellZ <= worldCellMaxZ; worldCellZ++)
+        for (int worldCellX = worldCellMinX; worldCellX <= worldCellMaxX; worldCellX++) {
+            if (!IsCurrentCellPunched(worldCellX, worldCellZ)) continue;
+
+            int chunkCellX = worldCellX - chunkOriginX;
+            int chunkCellZ = worldCellZ - chunkOriginZ;
+
+            for (int cornerZ = 0; cornerZ <= 1; cornerZ++)
+            for (int cornerX = 0; cornerX <= 1; cornerX++) {
+                int vx = chunkCellX + cornerX;
+                int vz = chunkCellZ + cornerZ;
+                if (vx < 0 || vx > VoxelChunk.SIZE || vz < 0 || vz > VoxelChunk.SIZE) { outOfChunk++; continue; }
+
+                touchedCorners++;
+
+                int worldVx = chunkOriginX + vx;
+                int worldVz = chunkOriginZ + vz;
+
+                float voxDx = worldVx - worldPos.x;
+                float voxDz = worldVz - worldPos.z;
+                float voxHorizDist = Mathf.Sqrt(voxDx * voxDx + voxDz * voxDz);
+
+                int yMinLocal = Mathf.Max(ProtectedYLocalExclusive(chunkOriginY),
+                    Mathf.FloorToInt(worldPos.y - verticalRadius) - 1 - chunkOriginY);
+                int yMaxLocal = Mathf.Min(VoxelChunk.SIZE,
+                    Mathf.CeilToInt(worldPos.y + verticalRadius) + 2 - chunkOriginY);
+
+                for (int yLocal = yMinLocal; yLocal <= yMaxLocal; yLocal++) {
+                    int worldY = chunkOriginY + yLocal;
+                    Vector3 delta = new Vector3(voxDx, worldY - worldPos.y, voxDz);
+                    float axial = Vector3.Dot(delta, normal);
+                    float radialSq = Mathf.Max(0f, delta.sqrMagnitude - axial * axial);
+                    float radial = Mathf.Sqrt(radialSq);
+                    float radialNorm = radial / Mathf.Max(outerRadius, 0.001f);
+                    float axialNorm = axial / Mathf.Max(verticalRadius, 0.001f);
+                    float density = radialNorm * radialNorm + axialNorm * axialNorm;
+                    if (density > 1f) continue;
+
+                    float sdf = Mathf.Clamp(density - 1f + 0.05f, -0.99f, 1f);
+
+                    var v = data.Chunk.Get(vx, yLocal, vz);
+                    bool isAtDefault = v.Value <= -1f + 1e-5f;
+                    if (sdf < v.Value || (isAtDefault && sdf < 0f))
+                        data.Chunk.Set(vx, yLocal, vz, new Terraform.Voxel.Core.Voxel { Value = sdf });
+                }
+            }
+        }
+
+        MergePunchedMaskIntoCarvedCells(data, punchedMask, worldCellMinX, worldCellMinZ);
+
+        string hmName = data.Heightmap != null ? data.Heightmap.gameObject.name : "?";
+        DebugLog(
+            $"[carve-raise] hm={hmName} pos=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) r={radius:F1} outerR={outerRadius:F1} " +
+            $"chunkOrigin=({chunkOriginX},{chunkOriginY},{chunkOriginZ}) " +
+            $"corners: touched={touchedCorners} outOfChunk={outOfChunk}");
     }
 }
