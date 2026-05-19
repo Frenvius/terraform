@@ -32,12 +32,13 @@ public partial class TerraformManager {
                 ToggleLeakDebug();
             }
 
-            if (Input.GetKeyDown(KeyCode.F4)) {
+            if (Input.GetKeyDown(KeyCode.F8)) {
                 ToggleHideWater();
             }
         }
 
         if (!Input.GetKeyDown(KeyCode.F8)) return;
+        if (Input.GetKeyDown(KeyCode.F4)) {
         if (Player.m_localPlayer == null) return;
         if (GameCamera.instance == null) return;
 
