@@ -47,30 +47,33 @@ public partial class TerraformManager {
         if (!Physics.Raycast(cam.position, cam.forward, out var hit, 50f, terrainMask))
             return;
 
-        var hm = Heightmap.FindHeightmap(hit.point);
+        PerformDigAt(hit.point);
+    }
+
+    public void PerformDigAt(Vector3 worldPos) {
+        var hm = Heightmap.FindHeightmap(worldPos);
         if (hm == null) return;
 
         float radius = Configs.ModConfig.BrushSize.Value;
 
-        float terrainY;
-        Heightmap.GetHeight(hit.point, out terrainY);
-        bool belowTerrain = hit.point.y < terrainY - 0.5f;
-        bool intersectsExistingSurfaceHole = belowTerrain && DigIntersectsExistingSurfaceHole(hit.point, radius);
+        Heightmap.GetHeight(worldPos, out float terrainY);
+        bool belowTerrain          = worldPos.y < terrainY - 0.5f;
+        bool overlapsExistingHole  = DigIntersectsExistingSurfaceHole(worldPos, radius);
         DigMode mode;
-        if (!belowTerrain) mode = DigMode.Surface;
-        else if (intersectsExistingSurfaceHole) mode = DigMode.OpenHoleDeepen;
-        else mode = DigMode.UndergroundTunnel;
+        if (overlapsExistingHole) mode = DigMode.OpenHoleDeepen;
+        else if (belowTerrain)    mode = DigMode.UndergroundTunnel;
+        else                       mode = DigMode.Surface;
 
         if (mode == DigMode.Surface) {
             float surfaceOuterRadius = radius * OuterRadiusMultiplier;
             float surfacePunchRadius = surfaceOuterRadius + ExtendedPunchBleed;
-            PunchHoles(hm, hit.point, surfacePunchRadius, surfaceOuterRadius, SurfacePunchMaxDelta(radius));
+            PunchHoles(hm, worldPos, surfacePunchRadius, surfaceOuterRadius, SurfacePunchMaxDelta(radius));
         } else {
             float pickaxeOuterRadius = PickaxeRadius + PickaxeNoiseAmplitude;
             float pickaxeReachY      = pickaxeOuterRadius * PickaxeHeightMultiplier;
-            PunchHoles(hm, hit.point, pickaxeOuterRadius, pickaxeOuterRadius, pickaxeReachY);
+            PunchHoles(hm, worldPos, pickaxeOuterRadius, pickaxeOuterRadius, pickaxeReachY);
         }
-        Dig(hit.point, radius, mode);
+        Dig(worldPos, radius, mode);
 
         if (_showDebugGrid) { RefreshDebugGrids(); RefreshDebugChunkWalls(); }
     }

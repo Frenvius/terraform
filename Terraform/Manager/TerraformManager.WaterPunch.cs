@@ -34,8 +34,11 @@ public partial class TerraformManager {
         float pickaxeReach  = PickaxeRadius + PickaxeNoiseAmplitude;
         float pickaxeReachY = pickaxeReach * PickaxeHeightMultiplier;
         foreach (var dig in digs) {
-            if (dig.Mode == DigMode.Surface) continue;
-            if (Mathf.Abs(dig.WorldPos.y - waterY) > pickaxeReachY + WaterDigReachMargin) continue;
+            float surfaceBowlDepth = dig.Radius * (BowlDepthMultiplier + ShelfDepthMultiplier);
+            float reachY = dig.Mode == DigMode.Surface ? surfaceBowlDepth + WaterDigReachMargin
+                                                       : pickaxeReachY + WaterDigReachMargin;
+            if (dig.WorldPos.y - waterY > reachY) continue;
+            if (waterY - dig.WorldPos.y > reachY) continue;
             (applicable ??= new List<DigRecord>()).Add(dig);
         }
 
