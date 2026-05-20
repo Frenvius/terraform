@@ -96,7 +96,6 @@ public partial class TerraformManager {
     private static void ResetChunkDigState(ChunkRenderData data) {
         data.Chunk = new VoxelChunk();
         data.RenderFootprints.Clear();
-        data.CarvedCells.Clear();
     }
 
     private void RebuildChunkFromHistory(ChunkRenderData data) {

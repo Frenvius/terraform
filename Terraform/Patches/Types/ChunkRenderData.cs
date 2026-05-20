@@ -14,5 +14,4 @@ public class ChunkRenderData {
     public Mesh Mesh;
     public float TerrainHeight;
     public readonly List<RenderFootprint> RenderFootprints = new();
-    public readonly HashSet<long> CarvedCells = new();
 }

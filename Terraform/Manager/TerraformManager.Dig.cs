@@ -8,6 +8,9 @@ public partial class TerraformManager {
     private static float SurfacePunchMaxDelta(float radius) =>
         radius * (1f + ShelfDepthMultiplier) + MinCeilingThickness;
 
+    private static float RaiseVerticalRadius(float radius) =>
+        Mathf.Max(radius * 1.75f, radius + 0.75f);
+
     private static float CraterRadiusAt(float worldX, float worldZ, float baseRadius) {
         float n = Mathf.PerlinNoise(worldX * NoiseFrequency + NoiseOffset,
                                     worldZ * NoiseFrequency + NoiseOffset);
@@ -19,54 +22,6 @@ public partial class TerraformManager {
         float nyz = Mathf.PerlinNoise(worldY * PickaxeNoiseFrequency, worldZ * PickaxeNoiseFrequency);
         float nzx = Mathf.PerlinNoise(worldZ * PickaxeNoiseFrequency, worldX * PickaxeNoiseFrequency);
         return ((nxy + nyz + nzx) / 3f - 0.5f) * 2f;
-    }
-
-    public void DigHeightmap(Vector3 worldPos, float radius, float depth) {
-        var hm = Heightmap.FindHeightmap(worldPos);
-        if (hm == null) {
-            TerraformPlugin.Log.LogWarning("No heightmap at position");
-            return;
-        }
-
-        var tc = hm.GetAndCreateTerrainCompiler();
-        if (tc == null) {
-            TerraformPlugin.Log.LogWarning("Could not get TerrainComp");
-            return;
-        }
-
-        EnsureTerrainCompReflection();
-        var levelDelta     = (float[])_levelDeltaField.GetValue(tc);
-        var modifiedHeight = (bool[])_modifiedHeightField.GetValue(tc);
-
-        hm.WorldToVertex(worldPos, out int cx, out int cy);
-        int r     = Mathf.CeilToInt(radius);
-        int width = hm.m_width + 1;
-        int count = 0;
-
-        for (int dy = -r; dy <= r; dy++)
-        for (int dx = -r; dx <= r; dx++) {
-            int x = cx + dx, y = cy + dy;
-            if (x < 0 || y < 0 || x >= width || y >= width) continue;
-
-            float dist = Mathf.Sqrt(dx * dx + dy * dy);
-            if (dist > radius) continue;
-
-            float t   = 1f - dist / radius;
-            int   idx = y * width + x;
-
-            levelDelta[idx]    -= depth * t;
-            levelDelta[idx]     = Mathf.Clamp(levelDelta[idx], -8f, 8f);
-            modifiedHeight[idx] = true;
-            count++;
-        }
-
-        _saveMethod.Invoke(tc, null);
-        hm.Poke(false);
-
-        if (ClutterSystem.instance != null)
-            ClutterSystem.instance.ResetGrass(worldPos, radius);
-
-        DebugLog($"Dug terrain: {count} verts modified, center=({cx},{cy})");
     }
 
     public void Dig(Vector3 worldPos, float radius, DigMode mode) {
@@ -242,8 +197,6 @@ public partial class TerraformManager {
             }
         }
 
-        MergePunchedMaskIntoCarvedCells(data, punchedMask, worldCellMinX, worldCellMinZ);
-
         string hmName = data.Heightmap != null ? data.Heightmap.gameObject.name : "?";
         DebugLog(
             $"[carve-surface] hm={hmName} dig=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) r={radius:F1} outerR={outerRadius:F1} " +
@@ -393,7 +346,7 @@ public partial class TerraformManager {
         int chunkOriginZ = Mathf.RoundToInt(origin.z);
 
         float outerRadius = radius * OuterRadiusMultiplier;
-        float verticalRadius = Mathf.Max(radius * 1.75f, radius + 0.75f);
+        float verticalRadius = RaiseVerticalRadius(radius);
         float apronRadius = outerRadius + ExtendedPunchBleed;
         Vector3 normal = surfaceNormal.sqrMagnitude > 0.001f ? surfaceNormal.normalized : Vector3.up;
 
@@ -466,8 +419,6 @@ public partial class TerraformManager {
                 }
             }
         }
-
-        MergePunchedMaskIntoCarvedCells(data, punchedMask, worldCellMinX, worldCellMinZ);
 
         string hmName = data.Heightmap != null ? data.Heightmap.gameObject.name : "?";
         DebugLog(

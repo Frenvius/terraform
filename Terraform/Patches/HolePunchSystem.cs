@@ -7,12 +7,18 @@ namespace Terraform.Patches;
 
 public static class HolePunchSystem {
     private static readonly Dictionary<int, HashSet<(int x, int y)>> _holes = new();
+    private static readonly Dictionary<int, HashSet<(int x, int y)>> _collisionHoles = new();
 
-    public static void PunchHole(Heightmap hm, int cellX, int cellY) {
+    public static void PunchHole(Heightmap hm, int cellX, int cellY, bool affectsCollision = true) {
         int id = hm.GetInstanceID();
         if (!_holes.TryGetValue(id, out var set))
             _holes[id] = set = new HashSet<(int, int)>();
         set.Add((cellX, cellY));
+
+        if (!affectsCollision) return;
+        if (!_collisionHoles.TryGetValue(id, out var colSet))
+            _collisionHoles[id] = colSet = new HashSet<(int, int)>();
+        colSet.Add((cellX, cellY));
     }
 
     public static bool IsHole(Heightmap hm, int cellX, int cellY) {
@@ -26,10 +32,16 @@ public static class HolePunchSystem {
         return Enumerable.Empty<(int, int)>();
     }
 
-    internal static void FilterHoleTriangles(Heightmap hm, Mesh mesh) {
+    public static IEnumerable<(int x, int y)> GetCollisionHoles(Heightmap hm) {
+        if (_collisionHoles.TryGetValue(hm.GetInstanceID(), out var set))
+            return set;
+        return Enumerable.Empty<(int, int)>();
+    }
+
+    internal static void FilterHoleTriangles(Heightmap hm, Mesh mesh, IEnumerable<(int x, int y)> holeSet) {
         if (mesh == null) return;
-        var holes = GetHoles(hm);
-        if (!holes.Any()) return;
+        var holes = holeSet as HashSet<(int x, int y)> ?? new HashSet<(int x, int y)>(holeSet);
+        if (holes.Count == 0) return;
 
         var indices = mesh.GetIndices(0);
         var verts = mesh.vertices;
@@ -53,7 +65,7 @@ public static class HolePunchSystem {
             int cx = UnityEngine.Mathf.FloorToInt((centroidLocalX + halfSize) * invScale);
             int cz = UnityEngine.Mathf.FloorToInt((centroidLocalZ + halfSize) * invScale);
 
-            if (IsHole(hm, cx, cz)) {
+            if (holes.Contains((cx, cz))) {
                 dropped++;
             } else {
                 filtered.Add(ia);
@@ -82,7 +94,7 @@ public static class HolePunchSystem {
 [HarmonyPatch(typeof(Heightmap), "RebuildCollisionMesh")]
 public static class Heightmap_RebuildCollisionMesh_Patch {
     static void Postfix(Heightmap __instance, Mesh ___m_collisionMesh, MeshCollider ___m_collider) {
-        HolePunchSystem.FilterHoleTriangles(__instance, ___m_collisionMesh);
+        HolePunchSystem.FilterHoleTriangles(__instance, ___m_collisionMesh, HolePunchSystem.GetCollisionHoles(__instance));
         if (___m_collider != null)
             ___m_collider.sharedMesh = ___m_collisionMesh;
     }
@@ -91,6 +103,6 @@ public static class Heightmap_RebuildCollisionMesh_Patch {
 [HarmonyPatch(typeof(Heightmap), "RebuildRenderMesh")]
 public static class Heightmap_RebuildRenderMesh_Patch {
     static void Postfix(Heightmap __instance, Mesh ___m_renderMesh) {
-        HolePunchSystem.FilterHoleTriangles(__instance, ___m_renderMesh);
+        HolePunchSystem.FilterHoleTriangles(__instance, ___m_renderMesh, HolePunchSystem.GetHoles(__instance));
     }
 }

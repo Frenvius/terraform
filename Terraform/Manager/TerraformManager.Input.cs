@@ -76,7 +76,7 @@ public partial class TerraformManager {
         DeriveModePunchParams(DigMode.Raise, radius, out float punchRadius, out float maxRaiseHeight);
         float outerRadius = radius * OuterRadiusMultiplier;
 
-        PunchHoles(hm, worldPos, punchRadius, outerRadius, maxRaiseHeight);
+        PunchHoles(hm, worldPos, punchRadius, outerRadius, maxRaiseHeight, affectsCollision: false, doPaint: false);
         Dig(worldPos, radius, DigMode.Raise, surfaceNormal);
 
         if (_showDebugGrid) { RefreshDebugGrids(); RefreshDebugChunkWalls(); }

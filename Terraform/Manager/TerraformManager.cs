@@ -122,14 +122,13 @@ public partial class TerraformManager : MonoBehaviour {
         return IsPositionInKnownDig(worldPos);
     }
 
-    public bool ShouldSuppressPlayerUnderWorldCheck(Vector3 worldPos) {
+    public bool ShouldSuppressUnderWorldCheck(Vector3 worldPos) {
         var hm = Heightmap.FindHeightmap(worldPos);
         if (hm == null) return false;
 
         if (!Heightmap.GetHeight(worldPos, out float terrainY)) return false;
-        if (worldPos.y < terrainY - UndergroundEnterMarginY) return IsPlayerInVoxelCavity(worldPos, hm, terrainY);
-        if (worldPos.y < terrainY) return false;
-        return IsPlayerUnderVoxelOverhang(worldPos, hm, terrainY);
+        if (worldPos.y >= terrainY - UndergroundEnterMarginY) return true;
+        return IsPlayerInVoxelCavity(worldPos, hm, terrainY);
     }
 
     private bool IsPlayerInVoxelCavity(Vector3 worldPos, Heightmap hm, float terrainY) {
@@ -141,20 +140,6 @@ public partial class TerraformManager : MonoBehaviour {
             return true;
 
         return IsPositionInKnownDig(worldPos);
-    }
-
-    private bool IsPlayerUnderVoxelOverhang(Vector3 worldPos, Heightmap hm, float terrainY) {
-        if (!_chunks.TryGetValue(hm.GetInstanceID(), out var data)
-            || data.Renderer == null
-            || !data.Renderer.enabled)
-            return false;
-
-        Vector3 origin = worldPos + Vector3.up * 0.25f;
-        if (!Physics.Raycast(origin, Vector3.up, out var hit, 8f, VoxelGroundProbe.PieceMask)) return false;
-        if (!VoxelGroundProbe.IsVoxelHit(hit)) return false;
-        if (hit.point.y <= terrainY + 1.0f) return false;
-        if (hit.point.y <= worldPos.y + 1.0f) return false;
-        return true;
     }
 
     private const float KnownDigXZSearchRadius = 4f;

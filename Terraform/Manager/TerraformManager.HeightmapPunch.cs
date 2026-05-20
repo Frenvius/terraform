@@ -61,23 +61,6 @@ public partial class TerraformManager {
             && punchedMask[x, z];
     }
 
-    private static void MergePunchedMaskIntoCarvedCells(
-        ChunkRenderData data,
-        bool[,] punchedMask,
-        int worldCellMinX,
-        int worldCellMinZ) {
-        int width = punchedMask.GetLength(0);
-        int depth = punchedMask.GetLength(1);
-        for (int z = 0; z < depth; z++)
-        for (int x = 0; x < width; x++) {
-            if (!punchedMask[x, z]) continue;
-            data.CarvedCells.Add(CellKey(worldCellMinX + x, worldCellMinZ + z));
-        }
-    }
-
-    private static bool IsCarvedCell(ChunkRenderData data, int worldX, int worldZ) =>
-        data.CarvedCells.Contains(CellKey(worldX, worldZ));
-
     private static bool CellNeedsPunch(Heightmap hm, int worldCellX, int worldCellZ, float hitY,
                                         float maxCeilingDelta, float fallbackTerrainY) {
         for (int dz = 0; dz <= 1; dz++)
@@ -89,11 +72,6 @@ public partial class TerraformManager {
             if (ty - hitY < maxCeilingDelta) return true;
         }
         return false;
-    }
-
-    private static bool CornerNeedsPunch(float cornerTerrainY, float hitY, bool isUnderground, float radius) {
-        float maxDelta = isUnderground ? MinCeilingThickness : SurfacePunchMaxDelta(radius);
-        return cornerTerrainY - hitY < maxDelta;
     }
 
     private void PaintTunnelDirt(Vector3 worldPos, float radius) {
@@ -120,7 +98,8 @@ public partial class TerraformManager {
         }
     }
 
-    private void PunchHoles(Heightmap _hitHm, Vector3 worldPos, float outerRadius, float paintRadius, float maxCeilingDelta) {
+    private void PunchHoles(Heightmap _hitHm, Vector3 worldPos, float outerRadius, float paintRadius, float maxCeilingDelta,
+                            bool affectsCollision = true, bool doPaint = true) {
 
         EnsureTerrainCompReflection();
 
@@ -147,11 +126,11 @@ public partial class TerraformManager {
             int punchedHere = PunchHolesOnHeightmap(
                 hm, worldPos, maxCeilingDelta,
                 punchedMask, wcMinX_world, wcMinZ_world,
-                wcMaxX_world, wcMaxZ_world);
+                wcMaxX_world, wcMaxZ_world, affectsCollision);
 
             bool hmIsLod = hm.gameObject.name.Contains("lodMesh");
             bool didSomethingHere = punchedHere > 0;
-            if (!hmIsLod && punchedHere > 0) {
+            if (doPaint && !hmIsLod && punchedHere > 0) {
                 var tc = hm.GetAndCreateTerrainCompiler();
                 if (tc != null && _tcPaintClearedMethod != null) {
                     _tcPaintClearedMethod.Invoke(tc, new object[] {
@@ -186,7 +165,8 @@ public partial class TerraformManager {
         int wcMinX_world,
         int wcMinZ_world,
         int wcMaxX_world,
-        int wcMaxZ_world) {
+        int wcMaxZ_world,
+        bool affectsCollision = true) {
 
         bool hmIsLod = hm.gameObject.name.Contains("lodMesh");
         float halfSize = hm.m_width * hm.m_scale * 0.5f;
@@ -208,7 +188,7 @@ public partial class TerraformManager {
             if (!IsMaskedCellPunched(punchedMask, wcMinX_world, wcMinZ_world, wcX, wcZ)) continue;
             if (!hmIsLod && !CellNeedsPunch(hm, wcX, wcZ, worldPos.y, maxCeilingDelta, hmPos.y)) continue;
 
-            HolePunchSystem.PunchHole(hm, x, z);
+            HolePunchSystem.PunchHole(hm, x, z, affectsCollision);
             punchedHere++;
         }
 
@@ -235,8 +215,9 @@ public partial class TerraformManager {
             int wcMaxZ = Mathf.FloorToInt(dig.WorldPos.z + outerRadius);
             var mask = BuildPunchedCellMask(wcMinX, wcMaxX, wcMinZ, wcMaxZ, dig.WorldPos, outerRadius);
 
+            bool affectsCollision = dig.Mode != DigMode.Raise;
             totalPunched += PunchHolesOnHeightmap(
-                hm, dig.WorldPos, maxCeilingDelta, mask, wcMinX, wcMinZ, wcMaxX, wcMaxZ);
+                hm, dig.WorldPos, maxCeilingDelta, mask, wcMinX, wcMinZ, wcMaxX, wcMaxZ, affectsCollision);
         }
 
         if (totalPunched > 0) {

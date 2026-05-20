@@ -6,43 +6,30 @@ using UnityEngine;
 namespace Terraform.Patches;
 
 public partial class TerraformManager {
-    private static FieldInfo  _levelDeltaField;
-    private static FieldInfo  _modifiedHeightField;
     private static MethodInfo _saveMethod;
     private static FieldInfo  _heightsField;
     private static MethodInfo _tcPaintClearedMethod;
-    private static MethodInfo _tcSmoothTerrainMethod;
-    private static MethodInfo _tcLevelTerrainMethod;
 
     private static FieldInfo  _materialInstanceField;
     private static FieldInfo  _paintMaskField;
-    private static MethodInfo _paintClearedMethod;
     private static FieldInfo  _cornerBiomesField;
     private static MethodInfo _getBiomeColorByEnum;
 
     private static FieldInfo _renderMeshField2;
 
     private static void EnsureTerrainCompReflection() {
-        if (_levelDeltaField != null) return;
+        if (_saveMethod != null) return;
         var t     = typeof(TerrainComp);
         var flags = BindingFlags.Instance | BindingFlags.NonPublic;
-        _levelDeltaField       = t.GetField("m_levelDelta",     flags);
-        _modifiedHeightField   = t.GetField("m_modifiedHeight", flags);
         _saveMethod            = t.GetMethod("Save",            flags);
         _tcPaintClearedMethod  = AccessTools.Method(typeof(TerrainComp), "PaintCleared",
             new[] { typeof(Vector3), typeof(float), typeof(TerrainModifier.PaintType), typeof(bool), typeof(bool) });
-        _tcSmoothTerrainMethod = AccessTools.Method(typeof(TerrainComp), "SmoothTerrain",
-            new[] { typeof(Vector3), typeof(float), typeof(bool), typeof(float) });
-        _tcLevelTerrainMethod  = AccessTools.Method(typeof(TerrainComp), "LevelTerrain",
-            new[] { typeof(Vector3), typeof(float), typeof(bool) });
     }
 
     private static void EnsureHeightmapReflection() {
         if (_materialInstanceField != null) return;
         _materialInstanceField = AccessTools.Field(typeof(Heightmap), "m_materialInstance");
         _paintMaskField        = AccessTools.Field(typeof(Heightmap), "m_paintMask");
-        _paintClearedMethod    = AccessTools.Method(typeof(Heightmap), "PaintCleared",
-            new[] { typeof(Vector3), typeof(float), typeof(TerrainModifier.PaintType), typeof(bool), typeof(bool) });
     }
 
     private static List<float> GetHeightsArray(Heightmap hm) {
