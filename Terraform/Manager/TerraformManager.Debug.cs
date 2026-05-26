@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
+using UnityEngine.AI;
 
 namespace Terraform.Patches;
 
@@ -27,6 +28,402 @@ public partial class TerraformManager {
         _debugMaterial = new Material(shader) { name = "TerraformVoxelDebugMagenta", color = Color.magenta };
         if (_debugMaterial.HasProperty("_Color")) _debugMaterial.SetColor("_Color", Color.magenta);
         return _debugMaterial;
+    }
+
+    private readonly List<NavMeshLinkInstance> _testLinks = new();
+
+    private GameObject _navOverlay;
+    private bool _navOverlayOn;
+    private Material _navOverlayMat;
+
+    private void ToggleNavOverlay() {
+        _navOverlayOn = !_navOverlayOn;
+        if (_navOverlayOn) RefreshNavOverlay();
+        else if (_navOverlay != null) { Destroy(_navOverlay); _navOverlay = null; }
+        TerraformPlugin.Log.LogInfo($"[navoverlay] {_navOverlayOn}");
+    }
+
+    private void RefreshNavOverlay() {
+        if (!_navOverlayOn) return;
+        var tri = NavMesh.CalculateTriangulation();
+        if (tri.vertices == null || tri.vertices.Length == 0) return;
+
+        if (_navOverlay == null) {
+            _navOverlay = new GameObject("TerraformNavOverlay");
+            _navOverlay.AddComponent<MeshFilter>();
+            var mr = _navOverlay.AddComponent<MeshRenderer>();
+            mr.sharedMaterial      = GetNavOverlayMaterial();
+            mr.shadowCastingMode   = UnityEngine.Rendering.ShadowCastingMode.Off;
+            mr.receiveShadows      = false;
+        }
+
+        var verts = new Vector3[tri.vertices.Length];
+        for (int i = 0; i < verts.Length; i++) verts[i] = tri.vertices[i] + Vector3.up * 0.15f;
+        var mesh = new Mesh { name = "TerraformNavOverlay", indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+        mesh.SetVertices(verts);
+        mesh.SetTriangles(tri.indices, 0);
+        mesh.RecalculateNormals();
+
+        var mf = _navOverlay.GetComponent<MeshFilter>();
+        if (mf.sharedMesh != null) Destroy(mf.sharedMesh);
+        mf.sharedMesh = mesh;
+    }
+
+    private Material GetNavOverlayMaterial() {
+        if (_navOverlayMat != null) return _navOverlayMat;
+        var sh = Shader.Find("Sprites/Default") ?? Shader.Find("Unlit/Color") ?? Shader.Find("Hidden/Internal-Colored");
+        _navOverlayMat = new Material(sh) { name = "TerraformNavOverlayMat", color = new Color(0.15f, 1f, 0.3f, 0.45f) };
+        if (_navOverlayMat.HasProperty("_Color")) _navOverlayMat.SetColor("_Color", new Color(0.15f, 1f, 0.3f, 0.45f));
+        return _navOverlayMat;
+    }
+
+    private void DropTestNavLink() {
+        var player = Player.m_localPlayer;
+        if (player == null) { TerraformPlugin.Log.LogInfo("[navlink] no player"); return; }
+        var pf = Pathfinding.instance;
+        if (pf == null) { TerraformPlugin.Log.LogInfo("[navlink] no Pathfinding"); return; }
+
+        Vector3 pp = player.transform.position;
+        if (!Heightmap.GetHeight(pp, out float terrainY)) { TerraformPlugin.Log.LogInfo("[navlink] no heightmap"); return; }
+
+        int agentId;
+        try {
+            var mi = AccessTools.Method(typeof(Pathfinding), "GetAgentID");
+            agentId = (int)mi.Invoke(pf, new object[] { Pathfinding.AgentType.Humanoid });
+        } catch (System.Exception e) {
+            TerraformPlugin.Log.LogWarning($"[navlink] GetAgentID failed: {e.Message}");
+            return;
+        }
+
+        var link = NavMesh.AddLink(new NavMeshLinkData {
+            startPosition = new Vector3(pp.x, terrainY, pp.z),
+            endPosition   = new Vector3(pp.x, pp.y, pp.z),
+            width         = 1.5f,
+            costModifier  = 10f,
+            bidirectional = true,
+            agentTypeID   = agentId,
+            area          = 2
+        });
+        if (link.valid) {
+            _testLinks.Add(link);
+            TerraformPlugin.Log.LogInfo(
+                $"[navlink] added link #{_testLinks.Count} top.y={terrainY:F2} bottom.y={pp.y:F2} agentId={agentId}");
+        } else {
+            TerraformPlugin.Log.LogWarning("[navlink] AddLink returned invalid");
+        }
+    }
+
+    private static int Uf_Find(int[] parent, int i) {
+        while (parent[i] != i) { parent[i] = parent[parent[i]]; i = parent[i]; }
+        return i;
+    }
+
+    private static void Uf_Union(int[] parent, int a, int b) {
+        int ra = Uf_Find(parent, a), rb = Uf_Find(parent, b);
+        if (ra != rb) parent[ra] = rb;
+    }
+
+    private void MeasureNavMeshFragmentation() {
+        var player = Player.m_localPlayer;
+        if (player == null) { TerraformPlugin.Log.LogInfo("[navfrag] no player"); return; }
+        Vector3 pp = player.transform.position;
+
+        var tri   = NavMesh.CalculateTriangulation();
+        var verts = tri.vertices;
+        var idx   = tri.indices;
+
+        const float R2 = 25f * 25f;
+        int nextId = 0;
+        var weld = new Dictionary<long, int>();
+        int Canon(Vector3 v) {
+            long qx = Mathf.RoundToInt(v.x / 0.05f) + 1048576L;
+            long qy = Mathf.RoundToInt(v.y / 0.05f) + 1048576L;
+            long qz = Mathf.RoundToInt(v.z / 0.05f) + 1048576L;
+            long key = qx | (qy << 21) | (qz << 42);
+            if (weld.TryGetValue(key, out int id)) return id;
+            id = nextId++; weld[key] = id; return id;
+        }
+
+        var triCanon = new List<int>();
+        var cent      = new List<Vector3>();
+        for (int t = 0; t * 3 + 2 < idx.Length; t++) {
+            int a = idx[t * 3], b = idx[t * 3 + 1], c = idx[t * 3 + 2];
+            Vector3 ce = (verts[a] + verts[b] + verts[c]) / 3f;
+            float dx = ce.x - pp.x, dz = ce.z - pp.z;
+            if (dx * dx + dz * dz > R2) continue;
+            triCanon.Add(Canon(verts[a])); triCanon.Add(Canon(verts[b])); triCanon.Add(Canon(verts[c]));
+            cent.Add(ce);
+        }
+        int n = cent.Count;
+        if (n == 0) { TerraformPlugin.Log.LogInfo("[navfrag] no navmesh triangles within 25u"); return; }
+
+        var parent = new int[n];
+        for (int i = 0; i < n; i++) parent[i] = i;
+        var edge = new Dictionary<long, int>(n * 3);
+        for (int i = 0; i < n; i++) {
+            int a = triCanon[i * 3], b = triCanon[i * 3 + 1], c = triCanon[i * 3 + 2];
+            LinkEdge(edge, parent, a, b, i);
+            LinkEdge(edge, parent, b, c, i);
+            LinkEdge(edge, parent, c, a, i);
+        }
+
+        var compCount = new Dictionary<int, int>();
+        var compYmin  = new Dictionary<int, float>();
+        var compYmax  = new Dictionary<int, float>();
+        for (int i = 0; i < n; i++) {
+            int r = Uf_Find(parent, i);
+            float y = cent[i].y;
+            if (!compCount.ContainsKey(r)) { compCount[r] = 1; compYmin[r] = y; compYmax[r] = y; }
+            else { compCount[r]++; compYmin[r] = Mathf.Min(compYmin[r], y); compYmax[r] = Mathf.Max(compYmax[r], y); }
+        }
+
+        int pTri = NearestTri(cent, pp);
+        int pRoot = pTri >= 0 ? Uf_Find(parent, pTri) : -1;
+
+        Character nearest = null; float bestSq = float.MaxValue;
+        var all = Character.GetAllCharacters();
+        for (int i = 0; i < all.Count; i++) {
+            var ch = all[i];
+            if (ch == null || ch == player || ch is Player) continue;
+            float dsq = (ch.transform.position - pp).sqrMagnitude;
+            if (dsq < bestSq) { bestSq = dsq; nearest = ch; }
+        }
+        int cRoot = -1;
+        if (nearest != null) {
+            int cTri = NearestTri(cent, nearest.transform.position);
+            cRoot = cTri >= 0 ? Uf_Find(parent, cTri) : -1;
+        }
+
+        TerraformPlugin.Log.LogInfo(
+            $"[navfrag] within 25u: {n} triangles → {compCount.Count} ISLANDS  (playerIslandTris={(pRoot >= 0 ? compCount[pRoot] : 0)})");
+        var roots = new List<int>(compCount.Keys);
+        roots.Sort((x, y) => compCount[y].CompareTo(compCount[x]));
+        for (int i = 0; i < roots.Count && i < 8; i++) {
+            int r = roots[i];
+            string tag = r == pRoot ? " [PLAYER]" : (r == cRoot ? " [CREATURE]" : "");
+            TerraformPlugin.Log.LogInfo(
+                $"[navfrag]   island {i}: {compCount[r]} tris  Y={compYmin[r]:F2}..{compYmax[r]:F2}{tag}");
+        }
+        if (nearest != null)
+            TerraformPlugin.Log.LogInfo(
+                $"[navfrag] player & creature same island? {(pRoot >= 0 && pRoot == cRoot ? "YES" : "NO")}  (creature dist={Mathf.Sqrt(bestSq):F1})");
+    }
+
+    private static void LinkEdge(Dictionary<long, int> edge, int[] parent, int a, int b, int tri) {
+        long key = a < b ? (long)a * 1000000L + b : (long)b * 1000000L + a;
+        if (edge.TryGetValue(key, out int other)) Uf_Union(parent, tri, other);
+        else edge[key] = tri;
+    }
+
+    private static int NearestTri(List<Vector3> cent, Vector3 p) {
+        int best = -1; float bestD = float.MaxValue;
+        for (int i = 0; i < cent.Count; i++) {
+            float d = (cent[i] - p).sqrMagnitude;
+            if (d < bestD) { bestD = d; best = i; }
+        }
+        return best;
+    }
+
+    private void ProbeTileState(Vector3 pp) {
+        var pf = Pathfinding.instance;
+        if (pf == null) { TerraformPlugin.Log.LogInfo("[navprobe-tile] no Pathfinding"); return; }
+        try {
+            var getTile = AccessTools.Method(typeof(Pathfinding), "GetTile",
+                new[] { typeof(Vector3), typeof(Pathfinding.AgentType) });
+            object tileId = getTile.Invoke(pf, new object[] { pp, Pathfinding.AgentType.Humanoid });
+
+            var tiles = AccessTools.Field(typeof(Pathfinding), "m_tiles").GetValue(pf) as System.Collections.IDictionary;
+            if (tiles == null) { TerraformPlugin.Log.LogInfo("[navprobe-tile] m_tiles null"); return; }
+            if (!tiles.Contains(tileId)) {
+                TerraformPlugin.Log.LogInfo("[navprobe-tile] NO TILE for player position (never poked/baked here)");
+                return;
+            }
+
+            object tile = tiles[tileId];
+            var tt = tile.GetType();
+            float bt = (float)AccessTools.Field(tt, "m_buildTime").GetValue(tile);
+            float ptm = (float)AccessTools.Field(tt, "m_pokeTime").GetValue(tile);
+            object inst = AccessTools.Field(tt, "m_instance").GetValue(tile);
+            bool valid = (bool)inst.GetType().GetProperty("valid").GetValue(inst);
+            object data = AccessTools.Field(tt, "m_data").GetValue(tile);
+            float now = Time.realtimeSinceStartup;
+            TerraformPlugin.Log.LogInfo(
+                $"[navprobe-tile] tile EXISTS builtAgo={now - bt:F1}s pokedAgo={now - ptm:F1}s instanceValid={valid} hasData={data != null}");
+        } catch (System.Exception e) {
+            TerraformPlugin.Log.LogWarning($"[navprobe-tile] reflect failed: {e.Message}");
+        }
+    }
+
+    private void ProbeCoverageCause(Vector3 pp) {
+        int mask = VoxelGroundProbe.TerrainAndPieceMask;
+
+        string ceil = "none<10u"; float clr = -1f;
+        if (Physics.Raycast(pp + Vector3.up * 0.15f, Vector3.up, out var uh, 10f, mask)) {
+            clr = uh.point.y - pp.y; ceil = uh.collider.gameObject.name;
+        }
+
+        float ymin = float.MaxValue, ymax = float.MinValue, minClr = float.MaxValue;
+        int hits = 0; Vector3 centerN = Vector3.up;
+        for (int gx = -1; gx <= 1; gx++) for (int gz = -1; gz <= 1; gz++) {
+            Vector3 o = new Vector3(pp.x + gx * 0.4f, pp.y + 3f, pp.z + gz * 0.4f);
+            if (Physics.Raycast(o, Vector3.down, out var dh, 6f, mask)) {
+                hits++;
+                ymin = Mathf.Min(ymin, dh.point.y); ymax = Mathf.Max(ymax, dh.point.y);
+                if (gx == 0 && gz == 0) centerN = dh.normal;
+                if (Physics.Raycast(dh.point + Vector3.up * 0.15f, Vector3.up, out var ch, 10f, mask))
+                    minClr = Mathf.Min(minClr, ch.point.y - dh.point.y);
+            }
+        }
+        float slope   = Vector3.Angle(centerN, Vector3.up);
+        float yspread = hits > 0 ? ymax - ymin : -1f;
+        float minClrR = minClr == float.MaxValue ? -1f : minClr;
+
+        string verdict =
+            (minClrR >= 0 && minClrR < 1.8f) ? "CLEARANCE (ceiling < agentHeight 1.8u)"
+            : (yspread > 0.5f || slope > 45f) ? "ROUGHNESS/SLOPE (jagged floor)"
+            : "neither obvious — check baking params";
+        TerraformPlugin.Log.LogInfo(
+            $"[navprobe-cause] clearance@player={clr:F2} ceiling='{ceil}'  grid3x3: hits={hits}/9 Yspread={yspread:F2} minClearance={minClrR:F2} centerSlope={slope:F0}deg → {verdict}");
+    }
+
+    private void ProbeNavMeshAtPlayer() {
+        var player = Player.m_localPlayer;
+        if (player == null) { TerraformPlugin.Log.LogInfo("[navprobe] no player"); return; }
+        Vector3 pp = player.transform.position;
+
+        Heightmap.GetHeight(pp, out float terrainY);
+        Vector3 origin = pp; origin.y = 6000f;
+        float voxelY = VoxelGroundProbe.VoxelTopY(origin);
+        TerraformPlugin.Log.LogInfo(
+            $"[navprobe] playerY={pp.y:F2} terrainY={terrainY:F2} voxelTopY={voxelY:F2} " +
+            $"belowTerrainBy={(terrainY - pp.y):F2}");
+
+        var pf = Pathfinding.instance;
+        if (pf == null) { TerraformPlugin.Log.LogInfo("[navprobe] no Pathfinding instance"); return; }
+
+        Vector3 fwd = player.transform.forward; fwd.y = 0f; fwd = fwd.normalized;
+        Vector3 target = pp + fwd * 4f;
+
+        bool have = pf.HavePath(pp, target, Pathfinding.AgentType.Humanoid);
+        bool found = pf.FindValidPoint(out Vector3 valid, pp, 4f, Pathfinding.AgentType.Humanoid);
+        TerraformPlugin.Log.LogInfo(
+            $"[navprobe] HavePath(pp→fwd4)={have}  FindValidPoint={found} → y={valid.y:F2} (dY from player={(valid.y - pp.y):F2})");
+
+        var pathIn = new List<Vector3>();
+        Vector3 surf = pp; surf.y = terrainY + 1f;
+        bool gpIn = pf.GetPath(surf, pp, pathIn, Pathfinding.AgentType.Humanoid);
+        if (gpIn && pathIn.Count > 0) {
+            Vector3 last = pathIn[pathIn.Count - 1];
+            float gap = last.y - pp.y;
+            TerraformPlugin.Log.LogInfo(
+                $"[navprobe] surface→cavefloor: GetPath={gpIn} corners={pathIn.Count} " +
+                $"start.y={pathIn[0].y:F2} last.y={last.y:F2} (gap above floor={gap:F2}) " +
+                $"→ {(Mathf.Abs(gap) < 2f ? "REACHES FLOOR (connected)" : "STOPS HIGH (entrance NOT connected)")}");
+        } else {
+            TerraformPlugin.Log.LogInfo($"[navprobe] surface→cavefloor: GetPath={gpIn} corners={pathIn.Count} (no route)");
+        }
+
+        Character nearest = null;
+        float bestSq = float.MaxValue;
+        var all = Character.GetAllCharacters();
+        for (int i = 0; i < all.Count; i++) {
+            var c = all[i];
+            if (c == null || c == player || c is Player) continue;
+            float dsq = (c.transform.position - pp).sqrMagnitude;
+            if (dsq < bestSq) { bestSq = dsq; nearest = c; }
+        }
+        if (nearest != null) {
+            Vector3 cpos = nearest.transform.position;
+            var agent = Pathfinding.AgentType.Humanoid;
+            bool alerted = false; int aiPathCount = -1; bool aiLastOk = false; string aiTarget = "?";
+            var baseAI = nearest.GetComponent<BaseAI>();
+            if (baseAI != null) {
+                try {
+                    alerted = baseAI.IsAlerted();
+                    agent   = (Pathfinding.AgentType)AccessTools.Field(typeof(BaseAI), "m_pathAgentType").GetValue(baseAI);
+                    var pth = AccessTools.Field(typeof(BaseAI), "m_path").GetValue(baseAI) as List<Vector3>;
+                    aiPathCount = pth != null ? pth.Count : -1;
+                    aiLastOk = (bool)AccessTools.Field(typeof(BaseAI), "m_lastFindPathResult").GetValue(baseAI);
+                    var mai = nearest.GetComponent<MonsterAI>();
+                    if (mai != null) {
+                        var tc = AccessTools.Field(typeof(MonsterAI), "m_targetCreature").GetValue(mai) as Character;
+                        aiTarget = tc != null ? tc.name : "null";
+                    }
+                } catch (System.Exception e) { TerraformPlugin.Log.LogWarning($"[navprobe] AI reflect: {e.Message}"); }
+            }
+            var cpath = new List<Vector3>();
+            bool cgp = pf.GetPath(cpos, pp, cpath, agent);
+            float lastDist = cpath.Count > 0 ? Vector3.Distance(cpath[cpath.Count - 1], pp) : -1f;
+            float startSnap = cpath.Count > 0 ? Vector3.Distance(cpath[0], cpos) : -1f;
+
+            int hid = 0;
+            try { hid = (int)AccessTools.Method(typeof(Pathfinding), "GetAgentID").Invoke(pf, new object[] { agent }); } catch { }
+            var hf = new UnityEngine.AI.NavMeshQueryFilter { agentTypeID = hid, areaMask = -1 };
+            bool covPlayer   = UnityEngine.AI.NavMesh.SamplePosition(pp,   out var cpH, 2f, hf);
+            bool covCreature = UnityEngine.AI.NavMesh.SamplePosition(cpos, out var ccH, 2f, hf);
+
+            TerraformPlugin.Log.LogInfo(
+                $"[navprobe] creature='{nearest.name}' dist={Mathf.Sqrt(bestSq):F1} agent={agent} grounded={nearest.IsOnGround()} " +
+                $"alerted={alerted} target={aiTarget} aiPathCount={aiPathCount} aiLastPathOk={aiLastOk}");
+            TerraformPlugin.Log.LogInfo(
+                $"[navprobe]   probe GetPath(creature→player)={cgp} corners={cpath.Count} startSnapDist={startSnap:F2} lastCornerDistToPlayer={lastDist:F2}");
+            TerraformPlugin.Log.LogInfo(
+                $"[navprobe]   navCoverage@player={covPlayer} (dist={(covPlayer ? Vector3.Distance(cpH.position, pp) : -1f):F2})  @creature={covCreature} (dist={(covCreature ? Vector3.Distance(ccH.position, cpos) : -1f):F2})  [agentId={hid}]");
+
+            var vhits = new RaycastHit[32];
+            Vector3 vo = pp; vo.y = 6000f;
+            int nvh = Physics.RaycastNonAlloc(vo, Vector3.down, vhits, 10000f, VoxelGroundProbe.PieceMask);
+            var vsb = new System.Text.StringBuilder();
+            for (int i = 0; i < nvh; i++)
+                vsb.Append($"{(VoxelGroundProbe.IsVoxelHit(vhits[i]) ? "V" : "?")}{vhits[i].point.y:F1} ");
+            Heightmap.GetHeight(pp, out float hmY);
+            TerraformPlugin.Log.LogInfo($"[navprobe]   raycastHits@player(n={nvh}): [{vsb}] heightmapY={hmY:F2}");
+
+            VoxelGroundProbe.NearestGroundY(pp, out float ghP);
+            Vector3 raised = pp; bool wasRaised = raised.y < ghP; if (wasRaised) raised.y = ghP;
+            bool snap15 = UnityEngine.AI.NavMesh.SamplePosition(raised, out var snpH, 1.5f, hf);
+            TerraformPlugin.Log.LogInfo(
+                $"[navprobe]   GroundHeight@player={ghP:F2} playerY={pp.y:F2} raised={wasRaised}→{raised.y:F2}  snapAfterRaise={snap15} landsAtY={(snap15 ? snpH.position.y : -1f):F2}");
+
+            var cvh = new RaycastHit[32];
+            Vector3 cvo = cpos; cvo.y = cpos.y + 1.5f;
+            int ncvh = Physics.RaycastNonAlloc(cvo, Vector3.down, cvh, 10000f, VoxelGroundProbe.PieceMask);
+            var cvsb = new System.Text.StringBuilder();
+            for (int i = 0; i < ncvh; i++) cvsb.Append($"{(VoxelGroundProbe.IsVoxelHit(cvh[i]) ? "V" : "?")}{cvh[i].point.y:F1} ");
+            VoxelGroundProbe.NearestGroundY(cpos, out float ghC);
+            Vector3 craised = cpos; bool cWasRaised = craised.y < ghC; if (cWasRaised) craised.y = ghC;
+            bool csnap = UnityEngine.AI.NavMesh.SamplePosition(craised, out var csnpH, 1.5f, hf);
+            TerraformPlugin.Log.LogInfo(
+                $"[navprobe]   creature: raycast(from+1.5)=[{cvsb}] GroundHeight={ghC:F2} creatureY={cpos.y:F2} raised={cWasRaised}→{craised.y:F2} snapLandsAtY={(csnap ? csnpH.position.y : -1f):F2}");
+            if (cpath.Count > 0)
+                TerraformPlugin.Log.LogInfo(
+                    $"[navprobe]   playerPos={pp.ToString("F2")} creaturePos={cpos.ToString("F2")} pathFirst={cpath[0].ToString("F2")} pathLast={cpath[cpath.Count - 1].ToString("F2")}");
+        } else {
+            TerraformPlugin.Log.LogInfo("[navprobe] no nearby creature");
+        }
+
+        ProbeCoverageCause(pp);
+        ProbeTileState(pp);
+
+        var tri = NavMesh.CalculateTriangulation();
+        var bands = new List<float>();
+        var counts = new List<int>();
+        int near = 0;
+        for (int i = 0; i < tri.vertices.Length; i++) {
+            Vector3 v = tri.vertices[i];
+            float dx = v.x - pp.x, dz = v.z - pp.z;
+            if (dx * dx + dz * dz > 16f) continue;
+            near++;
+            int b = -1;
+            for (int j = 0; j < bands.Count; j++)
+                if (Mathf.Abs(bands[j] - v.y) < 1.5f) { b = j; break; }
+            if (b < 0) { bands.Add(v.y); counts.Add(1); }
+            else { bands[b] = (bands[b] * counts[b] + v.y) / (counts[b] + 1); counts[b]++; }
+        }
+        TerraformPlugin.Log.LogInfo($"[navprobe] navmesh verts within 4u XZ: {near} → {bands.Count} Y-band(s)");
+        for (int j = 0; j < bands.Count; j++)
+            TerraformPlugin.Log.LogInfo($"[navprobe]   band Y≈{bands[j]:F2}  ({counts[j]} verts)");
+        TerraformPlugin.Log.LogInfo("[navprobe] (poked tiles; if 0 bands, wait ~1s and press again)");
     }
 
     private void InspectTriangleAtCrosshair() {

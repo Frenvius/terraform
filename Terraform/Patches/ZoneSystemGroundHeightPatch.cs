@@ -10,6 +10,10 @@ internal static class VoxelGroundProbe {
     private static int s_terrainMask;
     private static bool s_init;
 
+    private static readonly RaycastHit[] s_hits = new RaycastHit[64];
+
+    private const float GroundProbeUp = 1.5f;
+
     public static int PieceMask {
         get { Init(); return s_pieceMask; }
     }
@@ -36,21 +40,34 @@ internal static class VoxelGroundProbe {
         }
         return float.NegativeInfinity;
     }
+
+    public static bool NearestGroundY(Vector3 p, out float result) {
+        float queryY  = p.y;
+        bool  any     = false;
+        float best    = 0f;
+        float bestDist = float.MaxValue;
+
+        if (Heightmap.GetHeight(p, out float terrainY)) {
+            any = true; best = terrainY; bestDist = Mathf.Abs(terrainY - queryY);
+        }
+
+        Vector3 origin = p; origin.y = p.y + GroundProbeUp;
+        int n = Physics.RaycastNonAlloc(origin, Vector3.down, s_hits, 10000f, PieceMask);
+        for (int i = 0; i < n; i++) {
+            if (!IsVoxelHit(s_hits[i])) continue;
+            float d = Mathf.Abs(s_hits[i].point.y - queryY);
+            if (d < bestDist) { bestDist = d; best = s_hits[i].point.y; any = true; }
+        }
+
+        result = best;
+        return any;
+    }
 }
 
 [HarmonyPatch(typeof(ZoneSystem), nameof(ZoneSystem.GetGroundHeight), new[] { typeof(Vector3) })]
 public static class ZoneSystem_GetGroundHeight_Patch {
     static bool Prefix(Vector3 p, ref float __result) {
-        Vector3 origin = p;
-        origin.y = 6000f;
-
-        bool hitTerrain = Physics.Raycast(origin, Vector3.down, out var hit, 10000f, VoxelGroundProbe.TerrainMask);
-        float terrainY  = hitTerrain ? hit.point.y : float.NegativeInfinity;
-        float voxelY    = VoxelGroundProbe.VoxelTopY(origin);
-
-        if (voxelY > terrainY)  __result = voxelY;
-        else if (hitTerrain)    __result = terrainY;
-        else                    __result = p.y;
+        __result = VoxelGroundProbe.NearestGroundY(p, out float y) ? y : p.y;
         return false;
     }
 }
@@ -63,16 +80,8 @@ public static class ZoneSystem_GetGroundHeight_Out_Patch {
     }
 
     static bool Prefix(Vector3 p, ref float height, ref bool __result) {
-        p.y = 6000f;
-
-        bool hitTerrain = Physics.Raycast(p, Vector3.down, out var hit, 10000f, VoxelGroundProbe.TerrainMask);
-        float terrainY  = hitTerrain ? hit.point.y : float.NegativeInfinity;
-        float voxelY    = VoxelGroundProbe.VoxelTopY(p);
-
-        if (voxelY > terrainY) {
-            height = voxelY; __result = true;
-        } else if (hitTerrain) {
-            height = terrainY; __result = true;
+        if (VoxelGroundProbe.NearestGroundY(p, out float y)) {
+            height = y; __result = true;
         } else {
             height = 0f; __result = false;
         }

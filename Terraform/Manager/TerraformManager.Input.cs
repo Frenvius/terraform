@@ -35,6 +35,19 @@ public partial class TerraformManager {
             if (Input.GetKeyDown(KeyCode.F8)) {
                 ToggleHideWater();
             }
+
+            if (Input.GetKeyDown(KeyCode.F1)) {
+                bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+                bool alt  = Input.GetKey(KeyCode.LeftAlt)     || Input.GetKey(KeyCode.RightAlt);
+                if (ctrl)     DropTestNavLink();
+                else if (alt) MeasureNavMeshFragmentation();
+                else          ProbeNavMeshAtPlayer();
+            }
+
+            if (Input.GetKeyDown(KeyCode.F2)
+                && (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))) {
+                ToggleNavOverlay();
+            }
         }
 
         if (Input.GetKeyDown(KeyCode.F3)) {
