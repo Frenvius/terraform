@@ -137,7 +137,11 @@ public partial class TerraformManager {
         var hm = Heightmap.FindHeightmap(worldPos);
         if (hm == null) return;
 
-        Dig(worldPos, SmoothRadius, DigMode.Smooth);
+        var player = Player.m_localPlayer;
+        if (player == null) return;
+
+        Vector3 target = new Vector3(worldPos.x, player.transform.position.y, worldPos.z);
+        Dig(target, SmoothRadius, DigMode.Smooth);
 
         if (_showDebugGrid) { RefreshDebugGrids(); RefreshDebugChunkWalls(); }
     }
