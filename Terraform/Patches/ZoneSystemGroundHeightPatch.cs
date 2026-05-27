@@ -41,6 +41,21 @@ internal static class VoxelGroundProbe {
         return float.NegativeInfinity;
     }
 
+    public static bool FindVoxelFloorBelow(Vector3 origin, float maxDist, out RaycastHit floor) {
+        floor = default;
+        Vector3 cur = origin;
+        float remaining = maxDist;
+        for (int i = 0; i < 12 && remaining > 0.05f; i++) {
+            if (!Physics.Raycast(cur, Vector3.down, out var hit, remaining, PieceMask)) return false;
+            if (IsVoxelHit(hit) && hit.normal.y > 0.5f) { floor = hit; return true; }
+            float advance = cur.y - hit.point.y + 0.05f;
+            if (advance <= 0f) return false;
+            remaining -= advance;
+            cur = new Vector3(cur.x, hit.point.y - 0.05f, cur.z);
+        }
+        return false;
+    }
+
     public static bool NearestGroundY(Vector3 p, out float result) {
         float queryY  = p.y;
         bool  any     = false;

@@ -37,17 +37,22 @@ public partial class TerraformManager {
             }
 
             if (Input.GetKeyDown(KeyCode.F1)) {
-                bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
-                bool alt  = Input.GetKey(KeyCode.LeftAlt)     || Input.GetKey(KeyCode.RightAlt);
-                if (ctrl)     DropTestNavLink();
-                else if (alt) MeasureNavMeshFragmentation();
-                else          ProbeNavMeshAtPlayer();
+                bool alt = Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
+                if (alt) MeasureNavMeshFragmentation();
+                else     ProbeNavMeshAtPlayer();
             }
 
             if (Input.GetKeyDown(KeyCode.F2)
                 && (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))) {
                 ToggleNavOverlay();
+                return;
             }
+        }
+
+        if (Input.GetKeyDown(KeyCode.F2)
+            && !Input.GetKey(KeyCode.LeftShift) && !Input.GetKey(KeyCode.RightShift)) {
+            TryRaycastForAction(action: PerformSmoothAt);
+            return;
         }
 
         if (Input.GetKeyDown(KeyCode.F3)) {
@@ -136,4 +141,16 @@ public partial class TerraformManager {
         if (_showDebugGrid) { RefreshDebugGrids(); RefreshDebugChunkWalls(); }
     }
 
+    public void PerformSmoothAt(Vector3 worldPos) {
+        var hm = Heightmap.FindHeightmap(worldPos);
+        if (hm == null) return;
+
+        Dig(worldPos, SmoothRadius, DigMode.Smooth);
+
+        if (_showDebugGrid) { RefreshDebugGrids(); RefreshDebugChunkWalls(); }
+    }
+
+    private void PerformSmoothAt(RaycastHit hit) {
+        PerformSmoothAt(hit.point);
+    }
 }

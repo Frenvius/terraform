@@ -110,6 +110,7 @@
     <Compile Include="Patches\GameFindSpawnPointPatch.cs" />
     <Compile Include="Patches\ZoneSystemGroundHeightPatch.cs" />
     <Compile Include="Patches\PathfindingSeaLevelPatch.cs" />
+    <Compile Include="Patches\PathfindingWaterLayerPatch.cs" />
     <Compile Include="Patches\AttackSpawnOnHitTerrainPatch.cs" />
     <Compile Include="Patches\VoxelMeshDestructible.cs" />
     <Compile Include="Patches\PickaxeEffectFx.cs" />
@@ -131,6 +132,8 @@
     <Compile Include="Manager\TerraformManager.SurfaceOverlay.cs" />
     <Compile Include="Manager\TerraformManager.Material.cs" />
     <Compile Include="Manager\TerraformManager.Debug.cs" />
+    <Compile Include="Manager\TerraformManager.NavLinks.cs" />
+    <Compile Include="Manager\TerraformManager.NavBake.cs" />
     <Compile Include="Manager\TerraformManager.Water.cs" />
     <Compile Include="Manager\TerraformManager.WaterPunch.cs" />
     <Compile Include="Manager\TerraformManager.WaterLeak.cs" />

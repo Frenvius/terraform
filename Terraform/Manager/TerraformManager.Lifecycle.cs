@@ -18,6 +18,8 @@ public partial class TerraformManager {
                 var d = _chunks[k];
                 if (d?.MeshObject != null) Destroy(d.MeshObject);
                 if (d?.Mesh       != null) Destroy(d.Mesh);
+                RemoveLinksForChunk(k);
+                RemoveDigNavForChunk(k);
                 _chunks.Remove(k);
             }
         }
@@ -120,6 +122,10 @@ public partial class TerraformManager {
         if (replayed > 0) {
             ReplayDigPunchesOnHeightmap(data.Heightmap, digs);
             RebuildMesh(data);
+            int chunkId = data.Heightmap.GetInstanceID();
+            RemoveLinksForChunk(chunkId);
+            foreach (var dig in digs) PlaceLinksAtBoundary(dig.WorldPos, dig.Radius, chunkId);
+            RebuildChunkDigNav(chunkId, digs);
             DebugLog($"  replayed {replayed} digs onto new chunk");
         } else {
             data.Mesh.Clear();
