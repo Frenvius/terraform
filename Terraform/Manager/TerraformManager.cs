@@ -36,6 +36,10 @@ public partial class TerraformManager : MonoBehaviour {
     private const float PickaxeNoiseAmplitude   = 0.35f;
     private const float PickaxeHeightMultiplier = 1.5f;
 
+    private const float SmoothRadius   = 3f;
+    private const float SmoothPower    = 3f;
+    private const float SmoothMaxStep  = 0.5f;
+
     private const float ExtendedPunchBleed     = 2f;
     private const float CrossChunkPaintBleed   = 1.5f;
 

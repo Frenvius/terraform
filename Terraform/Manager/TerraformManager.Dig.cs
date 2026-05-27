@@ -86,6 +86,8 @@ public partial class TerraformManager {
             CarveSurfaceCrater(data, worldPos, radius);
         } else if (mode == DigMode.Raise) {
             CarveRaiseMound(data, worldPos, radius, normal);
+        } else if (mode == DigMode.Smooth) {
+            CarveSmoothSphere(data, worldPos, radius);
         } else {
             CarvePickaxeSphere(data, worldPos);
         }
@@ -276,6 +278,101 @@ public partial class TerraformManager {
             $"[carve-pickaxe] hm={hmName} dig=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) r={PickaxeRadius:F2} " +
             $"chunkOrigin=({chunkOriginX},{chunkOriginY},{chunkOriginZ}) " +
             $"writes={writes} skippedOutsideSphere={cornersOutsideSphere} outOfChunk={cornersOutOfChunk}");
+    }
+
+    private void CarveSmoothSphere(ChunkRenderData data, Vector3 worldPos, float radius) {
+        Vector3 origin = data.MeshObject.transform.position;
+        int chunkOriginX = Mathf.RoundToInt(origin.x);
+        int chunkOriginY = Mathf.RoundToInt(origin.y);
+        int chunkOriginZ = Mathf.RoundToInt(origin.z);
+        int yFloor       = ProtectedYLocalExclusive(chunkOriginY);
+        float targetY    = worldPos.y;
+
+        int worldCellMinX = Mathf.FloorToInt(worldPos.x - radius);
+        int worldCellMaxX = Mathf.FloorToInt(worldPos.x + radius);
+        int worldCellMinZ = Mathf.FloorToInt(worldPos.z - radius);
+        int worldCellMaxZ = Mathf.FloorToInt(worldPos.z + radius);
+        AddRenderFootprint(data, worldCellMinX, worldCellMaxX + 1, worldCellMinZ, worldCellMaxZ + 1);
+        SeedHeightmapSdfApron(data, chunkOriginX, chunkOriginY, chunkOriginZ,
+            worldCellMinX, worldCellMaxX, worldCellMinZ, worldCellMaxZ);
+
+        int worldVxMin = Mathf.FloorToInt(worldPos.x - radius) - 1;
+        int worldVxMax = Mathf.CeilToInt (worldPos.x + radius) + 1;
+        int worldVzMin = Mathf.FloorToInt(worldPos.z - radius) - 1;
+        int worldVzMax = Mathf.CeilToInt (worldPos.z + radius) + 1;
+
+        int writes = 0, columnsTouched = 0, columnsNoSurface = 0;
+
+        for (int worldVz = worldVzMin; worldVz <= worldVzMax; worldVz++)
+        for (int worldVx = worldVxMin; worldVx <= worldVxMax; worldVx++) {
+            int vx = worldVx - chunkOriginX;
+            int vz = worldVz - chunkOriginZ;
+            if (vx < 0 || vx > VoxelChunk.SIZE || vz < 0 || vz > VoxelChunk.SIZE) continue;
+
+            float dxF = worldVx - worldPos.x;
+            float dzF = worldVz - worldPos.z;
+            float distXZ = Mathf.Sqrt(dxF * dxF + dzF * dzF);
+            if (distXZ > radius) continue;
+
+            float distNorm = distXZ / radius;
+            float weight   = 1f - Mathf.Pow(Mathf.Clamp01(distNorm), SmoothPower);
+            if (weight <= 0f) continue;
+
+            int bestY = -1;
+            float bestFrac = 0f;
+            float bestDist = float.MaxValue;
+            for (int y = VoxelChunk.SIZE - 1; y >= yFloor; y--) {
+                var vHere  = data.Chunk.Get(vx, y, vz);
+                var vAbove = data.Chunk.Get(vx, y + 1, vz);
+                if (vHere.Value >= 0f || vAbove.Value < 0f) continue;
+                float denom = vAbove.Value - vHere.Value;
+                float frac  = denom > 1e-6f ? -vHere.Value / denom : 0f;
+                float surfaceWorldY = chunkOriginY + y + frac;
+                float d = Mathf.Abs(surfaceWorldY - targetY);
+                if (d < bestDist) {
+                    bestDist = d;
+                    bestY = y;
+                    bestFrac = frac;
+                }
+            }
+            if (bestY < 0) { columnsNoSurface++; continue; }
+
+            float surfaceY    = chunkOriginY + bestY + bestFrac;
+            float deltaY      = (targetY - surfaceY) * weight;
+            if (deltaY >  SmoothMaxStep) deltaY =  SmoothMaxStep;
+            if (deltaY < -SmoothMaxStep) deltaY = -SmoothMaxStep;
+            float newSurfaceY = surfaceY + deltaY;
+
+            int bandLoWorld = Mathf.FloorToInt(Mathf.Min(surfaceY, newSurfaceY)) - 2;
+            int bandHiWorld = Mathf.CeilToInt (Mathf.Max(surfaceY, newSurfaceY)) + 2;
+            int bandLo = Mathf.Max(yFloor, bandLoWorld - chunkOriginY);
+            int bandHi = Mathf.Min(VoxelChunk.SIZE, bandHiWorld - chunkOriginY);
+
+            columnsTouched++;
+
+            for (int yLocal = bandLo; yLocal <= bandHi; yLocal++) {
+                int worldY = chunkOriginY + yLocal;
+                float planeSdf = worldY - newSurfaceY;
+                if (planeSdf < -1f) planeSdf = -1f;
+                else if (planeSdf > 1f) planeSdf = 1f;
+
+                var v = data.Chunk.Get(vx, yLocal, vz);
+                float newVal = Mathf.Lerp(v.Value, planeSdf, weight);
+                if (newVal < -1f) newVal = -1f;
+                else if (newVal > 1f) newVal = 1f;
+                if (newVal == 0f) newVal = 0.001f;
+                if (Mathf.Abs(newVal - v.Value) < 1e-4f) continue;
+
+                data.Chunk.Set(vx, yLocal, vz, new Terraform.Voxel.Core.Voxel { Value = newVal });
+                writes++;
+            }
+        }
+
+        string hmName = data.Heightmap != null ? data.Heightmap.gameObject.name : "?";
+        DebugLog(
+            $"[carve-smooth] hm={hmName} pos=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) r={radius:F2} " +
+            $"target={targetY:F2} chunkOrigin=({chunkOriginX},{chunkOriginY},{chunkOriginZ}) " +
+            $"cols={columnsTouched} noSurface={columnsNoSurface} writes={writes}");
     }
 
     private static void AddRenderFootprint(ChunkRenderData data, int minX, int maxX, int minZ, int maxZ) {
