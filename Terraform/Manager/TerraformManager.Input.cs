@@ -4,53 +4,45 @@ namespace Terraform.Patches;
 
 public partial class TerraformManager {
     private void HandleInput() {
+        bool shift = Input.GetKey(KeyCode.LeftShift)   || Input.GetKey(KeyCode.RightShift);
+        bool alt   = Input.GetKey(KeyCode.LeftAlt)     || Input.GetKey(KeyCode.RightAlt);
+        bool ctrl  = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+
         if (VerboseLogs) {
-            if (Input.GetKeyDown(KeyCode.F9)) {
-                _showDebugGrid = !_showDebugGrid;
-                if (_showDebugGrid) { RefreshDebugGrids(); RefreshDebugChunkWalls(); }
-                else                { ClearDebugGrids();   ClearDebugChunkWalls();   }
-                TerraformPlugin.Log.LogInfo($"Debug grid: {_showDebugGrid}");
-            }
-
             if (Input.GetKeyDown(KeyCode.F10)) {
-                ToggleDebugNoNormalMap();
-            }
-
-            if (Input.GetKeyDown(KeyCode.F7)) {
-                ToggleHideHeightmaps();
+                if      (alt)   MeasureNavMeshFragmentation();
+                else if (shift) ToggleNavOverlay();
+                else            ProbeNavMeshAtPlayer();
+                return;
             }
 
             if (Input.GetKeyDown(KeyCode.F11)) {
-                ToggleDebugMagenta();
+                if      (alt)   ToggleDebugNoNormalMap();
+                else if (shift) ToggleDebugMagenta();
+                else            InspectTriangleAtCrosshair();
+                return;
             }
 
             if (Input.GetKeyDown(KeyCode.F12)) {
-                InspectTriangleAtCrosshair();
-            }
-
-            if (Input.GetKeyDown(KeyCode.F6)) {
-                ToggleLeakDebug();
-            }
-
-            if (Input.GetKeyDown(KeyCode.F8)) {
-                ToggleHideWater();
-            }
-
-            if (Input.GetKeyDown(KeyCode.F1)) {
-                bool alt = Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
-                if (alt) MeasureNavMeshFragmentation();
-                else     ProbeNavMeshAtPlayer();
-            }
-
-            if (Input.GetKeyDown(KeyCode.F2)
-                && (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))) {
-                ToggleNavOverlay();
+                if (ctrl) {
+                    ToggleLeakDebug();
+                } else if (alt) {
+                    ToggleHideWater();
+                } else if (shift) {
+                    ToggleHideHeightmaps();
+                } else {
+                    _showDebugGrid = !_showDebugGrid;
+                    if (_showDebugGrid) { RefreshDebugGrids(); RefreshDebugChunkWalls(); }
+                    else                { ClearDebugGrids();   ClearDebugChunkWalls();   }
+                    TerraformPlugin.Log.LogInfo($"Debug grid: {_showDebugGrid}");
+                }
                 return;
             }
         }
 
-        if (Input.GetKeyDown(KeyCode.F2)
-            && !Input.GetKey(KeyCode.LeftShift) && !Input.GetKey(KeyCode.RightShift)) {
+        if (shift || alt || ctrl) return;
+
+        if (Input.GetKeyDown(KeyCode.F1)) {
             TryRaycastForAction(action: PerformSmoothAt);
             return;
         }
