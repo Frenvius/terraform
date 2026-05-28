@@ -6,9 +6,16 @@ using Terraform.Patches;
 
 namespace Terraform.Persistence;
 
+public class ChunkPersistence {
+    public List<DigRecord> Digs = new();
+    public float TerrainHeight;
+    public byte[] VoxelData;
+    public bool VoxelDataIsFull;
+}
+
 public static class TerraformPersistence {
     private const int Magic   = 0x4D465254;
-    private const int Version = 2;
+    private const int Version = 4;
 
     private static string ResolveSavePath() {
         var worldField = AccessTools.Field(typeof(ZNet), "m_world");
@@ -23,7 +30,7 @@ public static class TerraformPersistence {
         return Path.Combine(localDir, world.m_fileName + ".terraform.bin");
     }
 
-    public static Dictionary<long, List<DigRecord>> Load() {
+    public static Dictionary<long, ChunkPersistence> Load() {
         string path = ResolveSavePath();
         if (string.IsNullOrEmpty(path) || !File.Exists(path)) return null;
 
@@ -43,13 +50,20 @@ public static class TerraformPersistence {
             }
 
             int chunkCount = reader.ReadInt32();
-            var result = new Dictionary<long, List<DigRecord>>(chunkCount);
+            var result = new Dictionary<long, ChunkPersistence>(chunkCount);
             int totalRecords = 0;
+            int totalSdf = 0;
 
             for (int i = 0; i < chunkCount; i++) {
                 long chunkKey = reader.ReadInt64();
+                var entry = new ChunkPersistence();
+
+                if (version >= 3) {
+                    entry.TerrainHeight = reader.ReadSingle();
+                }
+
                 int recordCount = reader.ReadInt32();
-                var list = new List<DigRecord>(recordCount);
+                entry.Digs = new List<DigRecord>(recordCount);
                 for (int j = 0; j < recordCount; j++) {
                     Vector3 worldPos = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
                     Vector3 normal = version >= 2
@@ -61,13 +75,23 @@ public static class TerraformPersistence {
                         Radius   = reader.ReadSingle(),
                         Mode     = (DigMode)reader.ReadInt32(),
                     };
-                    list.Add(rec);
+                    entry.Digs.Add(rec);
                     totalRecords++;
                 }
-                result[chunkKey] = list;
+
+                if (version >= 3) {
+                    int sdfLen = reader.ReadInt32();
+                    if (sdfLen > 0) {
+                        entry.VoxelData = reader.ReadBytes(sdfLen);
+                        entry.VoxelDataIsFull = version >= 4;
+                        totalSdf++;
+                    }
+                }
+
+                result[chunkKey] = entry;
             }
 
-            TerraformPlugin.Log.LogInfo($"Persistence: loaded {chunkCount} chunks ({totalRecords} digs) from {path}");
+            TerraformPlugin.Log.LogInfo($"Persistence: loaded {chunkCount} chunks ({totalRecords} digs, {totalSdf} with SDF) from {path}");
             return result;
         } catch (System.Exception ex) {
             TerraformPlugin.Log.LogError($"Persistence: load failed at {path}: {ex.Message}");
@@ -75,8 +99,8 @@ public static class TerraformPersistence {
         }
     }
 
-    public static void Save(Dictionary<long, List<DigRecord>> history) {
-        if (history == null) return;
+    public static void Save(Dictionary<long, ChunkPersistence> data) {
+        if (data == null) return;
         string path = ResolveSavePath();
         if (string.IsNullOrEmpty(path)) {
             TerraformPlugin.Log.LogWarning("Persistence: cannot resolve save path; world not ready");
@@ -89,12 +113,16 @@ public static class TerraformPersistence {
             using (var writer = new BinaryWriter(stream)) {
                 writer.Write(Magic);
                 writer.Write(Version);
-                writer.Write(history.Count);
+                writer.Write(data.Count);
 
                 int totalRecords = 0;
-                foreach (var kv in history) {
+                int totalSdf = 0;
+                foreach (var kv in data) {
                     writer.Write(kv.Key);
-                    var list = kv.Value ?? new List<DigRecord>();
+                    var entry = kv.Value ?? new ChunkPersistence();
+                    writer.Write(entry.TerrainHeight);
+
+                    var list = entry.Digs ?? new List<DigRecord>();
                     writer.Write(list.Count);
                     foreach (var rec in list) {
                         writer.Write(rec.WorldPos.x);
@@ -108,11 +136,19 @@ public static class TerraformPersistence {
                         writer.Write((int)rec.Mode);
                         totalRecords++;
                     }
+
+                    if (entry.VoxelData != null && entry.VoxelData.Length > 0) {
+                        writer.Write(entry.VoxelData.Length);
+                        writer.Write(entry.VoxelData);
+                        totalSdf++;
+                    } else {
+                        writer.Write(0);
+                    }
                 }
 
                 writer.Flush();
                 stream.Flush(true);
-                TerraformPlugin.Log.LogInfo($"Persistence: wrote {history.Count} chunks ({totalRecords} digs) -> {path}");
+                TerraformPlugin.Log.LogInfo($"Persistence: wrote {data.Count} chunks ({totalRecords} digs, {totalSdf} with SDF) -> {path}");
             }
 
             if (File.Exists(path)) File.Delete(path);

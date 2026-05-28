@@ -195,34 +195,58 @@ public partial class TerraformManager {
         return punchedHere;
     }
 
-    public void ReplayDigPunchesOnHeightmap(Heightmap hm, System.Collections.Generic.List<DigRecord> digs) {
-        if (hm == null || digs == null || digs.Count == 0) return;
+    public void ResetGrassForAllHistoricalDigs() {
+        if (ClutterSystem.instance == null) return;
+        if (_chunkDigHistory.Count == 0) return;
+        int resets = 0;
+        foreach (var list in _chunkDigHistory.Values) {
+            for (int i = 0; i < list.Count; i++) {
+                var dig = list[i];
+                if (dig.Mode == DigMode.Smooth) continue;
+                DeriveModePunchParams(dig.Mode, dig.Radius, out float outerRadius, out _);
+                float grassRadius = outerRadius * Mathf.Sqrt(2f) + 0.5f;
+                ClutterSystem.instance.ResetGrass(dig.WorldPos, grassRadius);
+                resets++;
+            }
+        }
+        DebugLog($"[replay-reset-grass] resets={resets}");
+    }
+
+    public void PunchAllHistoricalDigsOnHeightmap(Heightmap hm) {
+        if (hm == null) return;
         if (hm.gameObject.name.Contains("lodMesh")) return;
+        if (_chunkDigHistory.Count == 0) return;
 
         float halfSize = hm.m_width * hm.m_scale * 0.5f;
         Vector3 hmPos  = hm.transform.position;
         int totalPunched = 0;
+        int digsConsidered = 0;
 
-        foreach (var dig in digs) {
-            DeriveModePunchParams(dig.Mode, dig.Radius, out float outerRadius, out float maxCeilingDelta);
+        foreach (var list in _chunkDigHistory.Values) {
+            for (int i = 0; i < list.Count; i++) {
+                var dig = list[i];
+                if (dig.Mode == DigMode.Smooth) continue;
+                DeriveModePunchParams(dig.Mode, dig.Radius, out float outerRadius, out float maxCeilingDelta);
 
-            if (Mathf.Abs(dig.WorldPos.x - hmPos.x) > halfSize + outerRadius) continue;
-            if (Mathf.Abs(dig.WorldPos.z - hmPos.z) > halfSize + outerRadius) continue;
+                if (Mathf.Abs(dig.WorldPos.x - hmPos.x) > halfSize + outerRadius) continue;
+                if (Mathf.Abs(dig.WorldPos.z - hmPos.z) > halfSize + outerRadius) continue;
 
-            int wcMinX = Mathf.FloorToInt(dig.WorldPos.x - outerRadius);
-            int wcMaxX = Mathf.FloorToInt(dig.WorldPos.x + outerRadius);
-            int wcMinZ = Mathf.FloorToInt(dig.WorldPos.z - outerRadius);
-            int wcMaxZ = Mathf.FloorToInt(dig.WorldPos.z + outerRadius);
-            var mask = BuildPunchedCellMask(wcMinX, wcMaxX, wcMinZ, wcMaxZ, dig.WorldPos, outerRadius);
+                int wcMinX = Mathf.FloorToInt(dig.WorldPos.x - outerRadius);
+                int wcMaxX = Mathf.FloorToInt(dig.WorldPos.x + outerRadius);
+                int wcMinZ = Mathf.FloorToInt(dig.WorldPos.z - outerRadius);
+                int wcMaxZ = Mathf.FloorToInt(dig.WorldPos.z + outerRadius);
+                var mask = BuildPunchedCellMask(wcMinX, wcMaxX, wcMinZ, wcMaxZ, dig.WorldPos, outerRadius);
 
-            bool affectsCollision = dig.Mode != DigMode.Raise;
-            totalPunched += PunchHolesOnHeightmap(
-                hm, dig.WorldPos, maxCeilingDelta, mask, wcMinX, wcMinZ, wcMaxX, wcMaxZ, affectsCollision);
+                bool affectsCollision = dig.Mode != DigMode.Raise;
+                totalPunched += PunchHolesOnHeightmap(
+                    hm, dig.WorldPos, maxCeilingDelta, mask, wcMinX, wcMinZ, wcMaxX, wcMaxZ, affectsCollision);
+                digsConsidered++;
+            }
         }
 
         if (totalPunched > 0) {
             hm.Poke(false);
-            DebugLog($"[replay-punch] hm={hm.gameObject.name} digs={digs.Count} punched={totalPunched}");
+            DebugLog($"[replay-punch-all] hm={hm.gameObject.name} digsConsidered={digsConsidered} punched={totalPunched}");
         }
     }
 

@@ -9,6 +9,12 @@ public partial class TerraformManager : MonoBehaviour {
 
     private Dictionary<int, ChunkRenderData> _chunks;
     private Dictionary<long, List<DigRecord>> _chunkDigHistory = new();
+    private Dictionary<long, ChunkPersistence> _pendingPersistence = new();
+    private readonly Dictionary<int, long> _pendingBuildHash = new();
+    private readonly Dictionary<int, float> _pendingBuildSince = new();
+    private readonly Dictionary<int, long> _postLoadHeightsHash = new();
+    private readonly Dictionary<int, float> _postLoadWatchUntil = new();
+    private const float PostLoadWatchDuration = 20f;
     private bool _persistenceLoaded;
     private bool _saveSubscribed;
     private float _scanTimer;
@@ -25,7 +31,7 @@ public partial class TerraformManager : MonoBehaviour {
     private const float RimFeatherExtra       = 1.0f;
     private const float BowlDepthMultiplier   = 1.0f;
     private const float BowlFalloffExponent   = 2f;
-    private const float SeamInset             = 0.001f;
+    private const float SeamInset             = 0.04f;
     private const float ShallowAboveKeep      = 0.35f;
     private const float SeamSnapDepth         = 0.85f;
     private const float MinCeilingThickness   = 1.0f;
@@ -91,7 +97,12 @@ public partial class TerraformManager : MonoBehaviour {
         if (string.IsNullOrEmpty(ZNet.instance.GetWorldName())) return;
 
         var loaded = TerraformPersistence.Load();
-        if (loaded != null) _chunkDigHistory = loaded;
+        if (loaded != null) {
+            _pendingPersistence = loaded;
+            _chunkDigHistory = new Dictionary<long, List<DigRecord>>(loaded.Count);
+            foreach (var kv in loaded)
+                _chunkDigHistory[kv.Key] = kv.Value.Digs;
+        }
         _persistenceLoaded = true;
     }
 
@@ -108,7 +119,30 @@ public partial class TerraformManager : MonoBehaviour {
     }
 
     private void OnWorldSaveStarted() {
-        TerraformPersistence.Save(_chunkDigHistory);
+        var snapshot = BuildPersistenceSnapshot();
+        TerraformPersistence.Save(snapshot);
+    }
+
+    private Dictionary<long, ChunkPersistence> BuildPersistenceSnapshot() {
+        var snapshot = new Dictionary<long, ChunkPersistence>(_chunkDigHistory.Count);
+        foreach (var kv in _chunkDigHistory) {
+            var entry = new ChunkPersistence { Digs = new List<DigRecord>(kv.Value) };
+            snapshot[kv.Key] = entry;
+        }
+        if (_chunks != null) {
+            foreach (var data in _chunks.Values) {
+                if (data == null || data.MeshObject == null || data.Chunk == null) continue;
+                Vector3 origin = data.MeshObject.transform.position;
+                long chunkKey = ChunkKey(Mathf.RoundToInt(origin.x), Mathf.RoundToInt(origin.z));
+                if (!snapshot.TryGetValue(chunkKey, out var entry)) continue;
+                entry.TerrainHeight = data.TerrainHeight;
+                if (data.Chunk.HasAnyNonDefault()) {
+                    entry.VoxelData = data.Chunk.SerializeFull();
+                    entry.VoxelDataIsFull = true;
+                }
+            }
+        }
+        return snapshot;
     }
 
     public bool IsPlayerInVoxelCavity(Vector3 worldPos) {
