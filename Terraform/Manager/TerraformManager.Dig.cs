@@ -82,6 +82,8 @@ public partial class TerraformManager {
     }
 
     private void CarveCrater(ChunkRenderData data, Vector3 worldPos, float radius, DigMode mode, Vector3 normal) {
+        RefreshPieceMask(worldPos, radius * OuterRadiusMultiplier + ExtendedPunchBleed + 1f);
+
         if (mode == DigMode.Surface) {
             CarveSurfaceCrater(data, worldPos, radius);
         } else if (mode == DigMode.Raise) {
@@ -91,6 +93,8 @@ public partial class TerraformManager {
         } else {
             CarvePickaxeSphere(data, worldPos);
         }
+
+        SubtractPieces(data);
     }
 
     private void CarveSurfaceCrater(ChunkRenderData data, Vector3 worldPos, float radius) {
