@@ -56,8 +56,8 @@ public partial class TerraformManager {
                 ? new Material(placeholderShader) { color = Color.magenta }
                 : new Material(Shader.Find("Hidden/InternalErrorShader"));
             data.Renderer.enabled = false;
-            data.Renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            data.Renderer.receiveShadows    = false;
+            data.Renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.TwoSided;
+            data.Renderer.receiveShadows    = true;
             data.Renderer.lightProbeUsage      = UnityEngine.Rendering.LightProbeUsage.Off;
             data.Renderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
             data.Collider = data.MeshObject.AddComponent<MeshCollider>();
