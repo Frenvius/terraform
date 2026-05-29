@@ -113,6 +113,8 @@
     <Compile Include="Patches\PathfindingWaterLayerPatch.cs" />
     <Compile Include="Patches\AttackSpawnOnHitTerrainPatch.cs" />
     <Compile Include="Patches\VoxelMeshDestructible.cs" />
+    <Compile Include="Patches\VoxelSurface.cs" />
+    <Compile Include="Patches\ClutterGrassPatch.cs" />
     <Compile Include="Patches\PickaxeEffectFx.cs" />
     <Compile Include="Patches\HolePunchSystem.cs" />
     <Compile Include="Patches\WaterVolumeWaterSurfacePatch.cs" />

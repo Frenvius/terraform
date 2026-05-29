@@ -122,7 +122,7 @@ public partial class TerraformManager {
         if (mode == DigMode.Surface) {
             float surfaceOuterRadius = radius * OuterRadiusMultiplier;
             float surfacePunchRadius = surfaceOuterRadius + ExtendedPunchBleed;
-            PunchHoles(hm, digPos, surfacePunchRadius, surfaceOuterRadius, SurfacePunchMaxDelta(radius));
+            PunchHoles(hm, digPos, surfacePunchRadius, surfaceOuterRadius, SurfacePunchMaxDelta(radius), doPaint: false);
         } else {
             float pickaxeOuterRadius = PickaxeRadius + PickaxeNoiseAmplitude;
             float pickaxeReachY      = pickaxeOuterRadius * PickaxeHeightMultiplier;

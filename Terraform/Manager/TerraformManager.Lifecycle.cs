@@ -62,6 +62,7 @@ public partial class TerraformManager {
             data.Renderer.reflectionProbeUsage = UnityEngine.Rendering.ReflectionProbeUsage.Off;
             data.Collider = data.MeshObject.AddComponent<MeshCollider>();
             data.MeshObject.AddComponent<VoxelMeshDestructible>();
+            data.MeshObject.AddComponent<VoxelSurface>().Owner = hm;
 
             int pieceLayer = LayerMask.NameToLayer("piece");
             if (pieceLayer >= 0) {
