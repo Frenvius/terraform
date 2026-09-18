@@ -7,6 +7,7 @@ namespace Terraform.Patches;
 public class ChunkRenderData {
     public VoxelChunk Chunk;
     public Heightmap Heightmap;
+    public MeshCollider HeightmapCollider;
     public GameObject MeshObject;
     public MeshFilter Filter;
     public MeshRenderer Renderer;

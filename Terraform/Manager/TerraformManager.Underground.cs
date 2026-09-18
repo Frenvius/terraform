@@ -5,12 +5,18 @@ namespace Terraform.Patches;
 public partial class TerraformManager {
     private readonly System.Collections.Generic.HashSet<MeshCollider> _ignoredHmCols = new();
     private CapsuleCollider _ignoredPlayerCol;
+    private Player _cachedPlayer;
+    private CapsuleCollider _cachedPlayerCol;
 
     private void UpdateUndergroundCollision() {
         var player = Player.m_localPlayer;
         if (player == null) return;
 
-        var playerCol = player.GetComponent<CapsuleCollider>();
+        if (player != _cachedPlayer) {
+            _cachedPlayer    = player;
+            _cachedPlayerCol = player.GetComponent<CapsuleCollider>();
+        }
+        var playerCol = _cachedPlayerCol;
         if (playerCol == null) return;
 
         Vector3 playerPos = player.transform.position;
@@ -29,15 +35,17 @@ public partial class TerraformManager {
 
         if (shouldIgnore) {
             var bounds = playerCol.bounds;
-            foreach (var hm in FindObjectsByType<Heightmap>(FindObjectsSortMode.None)) {
-                if (hm.gameObject.name.Contains("lodMesh")) continue;
-                var hmCol = hm.GetComponent<MeshCollider>();
+            foreach (var chunk in _chunks.Values) {
+                var hm = chunk?.Heightmap;
+                if (hm == null) continue;
+                if (chunk.HeightmapCollider == null) chunk.HeightmapCollider = hm.GetComponent<MeshCollider>();
+                var hmCol = chunk.HeightmapCollider;
                 if (hmCol == null) continue;
                 if (!hmCol.bounds.Intersects(bounds)) continue;
 
                 if (_ignoredHmCols.Add(hmCol)) {
                     Physics.IgnoreCollision(playerCol, hmCol, true);
-                    DebugLog(
+                    if (VerboseLogs) DebugLog(
                         $"[ground] IGNORE +hm={hm.name} playerY={playerPos.y:F2} terrainY={terrainY:F2} dY={(playerPos.y - terrainY):F2}");
                 }
             }

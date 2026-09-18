@@ -72,7 +72,7 @@ public partial class TerraformManager {
             }
         }
 
-        DebugLog($"[water-leak] active={_waterLeaks.Count} waterfalls={_waterfallInstances.Count}");
+        if (VerboseLogs) DebugLog($"[water-leak] active={_waterLeaks.Count} waterfalls={_waterfallInstances.Count}");
     }
 
     private List<LidCircle> CollectLidCirclesForChunk(ChunkRenderData chunkData, float waterY) {

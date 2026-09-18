@@ -7,20 +7,22 @@ public class UVScroller : MonoBehaviour {
     public float SpeedX;
     public float SpeedY = 0.5f;
 
-    private Renderer _renderer;
+    private Material _material;
     private float _accX;
     private float _accY;
 
     private void Start() {
-        _renderer = GetComponent<Renderer>();
+        var renderer = GetComponent<Renderer>();
+        if (renderer == null) return;
+        var mats = renderer.materials;
+        if (mats == null || TargetMaterialSlot < 0 || TargetMaterialSlot >= mats.Length) return;
+        _material = mats[TargetMaterialSlot];
     }
 
     private void Update() {
-        if (_renderer == null) return;
+        if (_material == null) return;
         _accX += Time.deltaTime * SpeedX;
         _accY += Time.deltaTime * SpeedY;
-        var mats = _renderer.materials;
-        if (mats == null || TargetMaterialSlot < 0 || TargetMaterialSlot >= mats.Length) return;
-        mats[TargetMaterialSlot].SetTextureOffset("_MainTex", new Vector2(_accX, _accY));
+        _material.SetTextureOffset("_MainTex", new Vector2(_accX, _accY));
     }
 }

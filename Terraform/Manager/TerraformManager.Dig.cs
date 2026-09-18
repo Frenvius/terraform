@@ -72,7 +72,7 @@ public partial class TerraformManager {
                         float grassRadius = refineRadius * Mathf.Sqrt(2f) + 0.5f;
                         ClutterSystem.instance.ResetGrass(worldPos, grassRadius);
                     }
-                    DebugLog($"[refine-punch] hm={data.Heightmap.gameObject.name} added={refined}");
+                    if (VerboseLogs) DebugLog($"[refine-punch] hm={data.Heightmap.gameObject.name} added={refined}");
                 }
             }
 
@@ -82,7 +82,7 @@ public partial class TerraformManager {
 
             BakeDigNavForChunk(kv.Key, chunkOriginX, chunkOriginZ);
 
-            DebugLog(
+            if (VerboseLogs) DebugLog(
                 $"Dig world=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) " +
                 $"mode={mode} terrainH={data.TerrainHeight:F1} " +
                 $"history={digs.Count}");
@@ -229,12 +229,14 @@ public partial class TerraformManager {
             }
         }
 
-        string hmName = data.Heightmap != null ? data.Heightmap.gameObject.name : "?";
-        DebugLog(
-            $"[carve-surface] hm={hmName} dig=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) r={radius:F1} outerR={outerRadius:F1} " +
-            $"chunkOrigin=({chunkOriginX},{chunkOriginY},{chunkOriginZ}) " +
-            $"cellRange=[{worldCellMinX}..{worldCellMaxX}]x[{worldCellMinZ}..{worldCellMaxZ}] " +
-            $"corners: boundary={boundaryCornersTouched} interior={interiorCornersTouched} outOfChunk={cornersOutOfChunk}");
+        if (VerboseLogs) {
+            string hmName = data.Heightmap != null ? data.Heightmap.gameObject.name : "?";
+            DebugLog(
+                $"[carve-surface] hm={hmName} dig=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) r={radius:F1} outerR={outerRadius:F1} " +
+                $"chunkOrigin=({chunkOriginX},{chunkOriginY},{chunkOriginZ}) " +
+                $"cellRange=[{worldCellMinX}..{worldCellMaxX}]x[{worldCellMinZ}..{worldCellMaxZ}] " +
+                $"corners: boundary={boundaryCornersTouched} interior={interiorCornersTouched} outOfChunk={cornersOutOfChunk}");
+        }
     }
 
     private void CarvePickaxeSphere(ChunkRenderData data, Vector3 worldPos) {
@@ -299,11 +301,13 @@ public partial class TerraformManager {
             }
         }
 
-        string hmName = data.Heightmap != null ? data.Heightmap.gameObject.name : "?";
-        DebugLog(
-            $"[carve-pickaxe] hm={hmName} dig=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) r={PickaxeRadius:F2} " +
-            $"chunkOrigin=({chunkOriginX},{chunkOriginY},{chunkOriginZ}) " +
-            $"writes={writes} skippedOutsideSphere={cornersOutsideSphere} outOfChunk={cornersOutOfChunk}");
+        if (VerboseLogs) {
+            string hmName = data.Heightmap != null ? data.Heightmap.gameObject.name : "?";
+            DebugLog(
+                $"[carve-pickaxe] hm={hmName} dig=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) r={PickaxeRadius:F2} " +
+                $"chunkOrigin=({chunkOriginX},{chunkOriginY},{chunkOriginZ}) " +
+                $"writes={writes} skippedOutsideSphere={cornersOutsideSphere} outOfChunk={cornersOutOfChunk}");
+        }
     }
 
     private void CarveSmoothSphere(ChunkRenderData data, Vector3 worldPos, float radius) {
@@ -394,11 +398,13 @@ public partial class TerraformManager {
             }
         }
 
-        string hmName = data.Heightmap != null ? data.Heightmap.gameObject.name : "?";
-        DebugLog(
-            $"[carve-smooth] hm={hmName} pos=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) r={radius:F2} " +
-            $"target={targetY:F2} chunkOrigin=({chunkOriginX},{chunkOriginY},{chunkOriginZ}) " +
-            $"cols={columnsTouched} noSurface={columnsNoSurface} writes={writes}");
+        if (VerboseLogs) {
+            string hmName = data.Heightmap != null ? data.Heightmap.gameObject.name : "?";
+            DebugLog(
+                $"[carve-smooth] hm={hmName} pos=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) r={radius:F2} " +
+                $"target={targetY:F2} chunkOrigin=({chunkOriginX},{chunkOriginY},{chunkOriginZ}) " +
+                $"cols={columnsTouched} noSurface={columnsNoSurface} writes={writes}");
+        }
     }
 
     private static void AddRenderFootprint(ChunkRenderData data, int minX, int maxX, int minZ, int maxZ) {
@@ -547,10 +553,12 @@ public partial class TerraformManager {
             }
         }
 
-        string hmName = data.Heightmap != null ? data.Heightmap.gameObject.name : "?";
-        DebugLog(
-            $"[carve-raise] hm={hmName} pos=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) r={radius:F1} outerR={outerRadius:F1} " +
-            $"chunkOrigin=({chunkOriginX},{chunkOriginY},{chunkOriginZ}) " +
-            $"corners: touched={touchedCorners} outOfChunk={outOfChunk}");
+        if (VerboseLogs) {
+            string hmName = data.Heightmap != null ? data.Heightmap.gameObject.name : "?";
+            DebugLog(
+                $"[carve-raise] hm={hmName} pos=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) r={radius:F1} outerR={outerRadius:F1} " +
+                $"chunkOrigin=({chunkOriginX},{chunkOriginY},{chunkOriginZ}) " +
+                $"corners: touched={touchedCorners} outOfChunk={outOfChunk}");
+        }
     }
 }

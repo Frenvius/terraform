@@ -28,7 +28,7 @@ public partial class TerraformManager {
             }
         }
 
-        foreach (var hm in FindObjectsByType<Heightmap>(FindObjectsSortMode.None)) {
+        foreach (var hm in Heightmap.GetAllHeightmaps()) {
             int id = hm.GetInstanceID();
             if (_chunks.ContainsKey(id)) continue;
 

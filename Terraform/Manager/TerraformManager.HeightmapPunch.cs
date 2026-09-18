@@ -107,7 +107,7 @@ public partial class TerraformManager {
 
         int totalPunched = 0;
         var allHms = FindObjectsByType<Heightmap>(FindObjectsSortMode.None);
-        DebugLog($"PunchHoles: scanning {allHms.Length} heightmaps in scene (outerRadius={outerRadius:F2} maxCeilingDelta={maxCeilingDelta:F2})");
+        if (VerboseLogs) DebugLog($"PunchHoles: scanning {allHms.Length} heightmaps in scene (outerRadius={outerRadius:F2} maxCeilingDelta={maxCeilingDelta:F2})");
         int wcMinX_world = Mathf.FloorToInt(worldPos.x - outerRadius);
         int wcMaxX_world = Mathf.FloorToInt(worldPos.x + outerRadius);
         int wcMinZ_world = Mathf.FloorToInt(worldPos.z - outerRadius);
@@ -139,7 +139,7 @@ public partial class TerraformManager {
 
             if (!didSomethingHere) continue;
             totalPunched += punchedHere;
-            if (punchedHere > 0) {
+            if (punchedHere > 0 && VerboseLogs) {
                 DebugLog($"  punched {punchedHere} cells on hm={hm.gameObject.name} pos={hmPos} scale={hm.m_scale} width={hm.m_width}");
             }
 
@@ -151,7 +151,7 @@ public partial class TerraformManager {
             ClutterSystem.instance.ResetGrass(worldPos, grassRadius);
         }
 
-        DebugLog($"PunchHoles: {totalPunched} cells across hms @ {worldPos}");
+        if (VerboseLogs) DebugLog($"PunchHoles: {totalPunched} cells across hms @ {worldPos}");
     }
 
     private static int PunchHolesOnHeightmap(
