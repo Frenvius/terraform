@@ -4,6 +4,9 @@ using Terraform.Voxel.Core;
 namespace Terraform.Voxel.Meshing;
 
 public static class MarchingCubesMesher {
+    private static readonly float[] _vals = new float[8];
+    private static readonly Vertex3[] _edgeVerts = new Vertex3[12];
+
     public static MeshData Build(VoxelChunk chunk) {
         var data = new MeshData();
         var vertCache = new Dictionary<long, int>();
@@ -21,31 +24,30 @@ public static class MarchingCubesMesher {
         MeshData data, Dictionary<long, int> cache) {
 
         var corners  = MarchingCubesTables.Corners;
-        float[] vals = new float[8];
         for (int i = 0; i < 8; i++) {
             var (ox, oy, oz) = corners[i];
-            vals[i] = chunk.Get(cx + ox, cy + oy, cz + oz).Value;
+            _vals[i] = chunk.Get(cx + ox, cy + oy, cz + oz).Value;
         }
 
         int cubeIndex = 0;
         for (int i = 0; i < 8; i++)
-            if (vals[i] < 0f) cubeIndex |= (1 << i);
+            if (_vals[i] < 0f) cubeIndex |= (1 << i);
 
         int edgeMask = MarchingCubesTables.EdgeTable[cubeIndex];
         if (edgeMask == 0) return;
 
-        var edgeVerts = new Vertex3[12];
+        System.Array.Clear(_edgeVerts, 0, _edgeVerts.Length);
         var edges = MarchingCubesTables.Edges;
         for (int e = 0; e < 12; e++) {
             if ((edgeMask & (1 << e)) == 0) continue;
             var (a, b) = edges[e];
             var (ax, ay, az) = corners[a];
             var (bx, by, bz) = corners[b];
-            float t = vals[a] / (vals[a] - vals[b]);
+            float t = _vals[a] / (_vals[a] - _vals[b]);
             float vx = (float)System.Math.Round((cx + ax + t * (bx - ax)) * 100.0) / 100f;
             float vy = (float)System.Math.Round((cy + ay + t * (by - ay)) * 100.0) / 100f;
             float vz = (float)System.Math.Round((cz + az + t * (bz - az)) * 100.0) / 100f;
-            edgeVerts[e] = new Vertex3(vx, vy, vz);
+            _edgeVerts[e] = new Vertex3(vx, vy, vz);
         }
 
         var triTable = MarchingCubesTables.TriTable;
@@ -54,9 +56,9 @@ public static class MarchingCubesMesher {
             int e1 = triTable[cubeIndex, t + 1];
             int e2 = triTable[cubeIndex, t + 2];
 
-            data.Indices.Add(GetOrAddVertex(edgeVerts[e0], data, cache));
-            data.Indices.Add(GetOrAddVertex(edgeVerts[e2], data, cache));
-            data.Indices.Add(GetOrAddVertex(edgeVerts[e1], data, cache));
+            data.Indices.Add(GetOrAddVertex(_edgeVerts[e0], data, cache));
+            data.Indices.Add(GetOrAddVertex(_edgeVerts[e2], data, cache));
+            data.Indices.Add(GetOrAddVertex(_edgeVerts[e1], data, cache));
         }
     }
 
