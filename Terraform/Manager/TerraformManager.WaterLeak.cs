@@ -118,6 +118,7 @@ public partial class TerraformManager {
     }
 
     private static int SampleDeepestAirAround(ChunkRenderData chunkData, int localX, int localZ) {
+        if (chunkData.Chunk == null) return -1;
         int deepest = -1;
         for (int dz = -1; dz <= 1; dz++) {
             for (int dx = -1; dx <= 1; dx++) {

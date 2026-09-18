@@ -6,6 +6,13 @@ namespace Terraform.Patches;
 
 public partial class TerraformManager {
     private void RebuildMesh(ChunkRenderData data) {
+        if (data.Chunk == null) {
+            data.Mesh.Clear();
+            SetChunkVisible(data, false);
+            if (data.Collider != null) data.Collider.sharedMesh = null;
+            return;
+        }
+
         var swMc = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
         var meshData = Terraform.Voxel.Meshing.MarchingCubesMesher.Build(data.Chunk);
         long mcTicks = swMc?.ElapsedTicks ?? 0;

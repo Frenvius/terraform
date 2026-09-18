@@ -103,6 +103,7 @@ public partial class TerraformManager {
     }
 
     private void CarveCrater(ChunkRenderData data, Vector3 worldPos, float radius, DigMode mode, Vector3 normal) {
+        data.Chunk ??= new VoxelChunk();
         RefreshPieceMask(worldPos, radius * OuterRadiusMultiplier + ExtendedPunchBleed + 1f);
 
         if (mode == DigMode.Surface) {

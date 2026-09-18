@@ -132,12 +132,12 @@ public partial class TerraformManager : MonoBehaviour {
         }
         if (_chunks != null) {
             foreach (var data in _chunks.Values) {
-                if (data == null || data.MeshObject == null || data.Chunk == null) continue;
+                if (data == null || data.MeshObject == null) continue;
                 Vector3 origin = data.MeshObject.transform.position;
                 long chunkKey = ChunkKey(Mathf.RoundToInt(origin.x), Mathf.RoundToInt(origin.z));
                 if (!snapshot.TryGetValue(chunkKey, out var entry)) continue;
                 entry.TerrainHeight = data.TerrainHeight;
-                if (data.Chunk.HasAnyNonDefault()) {
+                if (data.Chunk != null && data.Chunk.HasAnyNonDefault()) {
                     entry.VoxelData = data.Chunk.SerializeFull();
                     entry.VoxelDataIsFull = true;
                 }

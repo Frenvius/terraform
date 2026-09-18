@@ -38,7 +38,6 @@ public partial class TerraformManager {
             DumpMaterialOnce(hm);
 
             var data = new ChunkRenderData {
-                Chunk      = new VoxelChunk(),
                 Heightmap  = hm,
                 MeshObject = new GameObject("TerraformVoxels"),
                 Mesh       = new Mesh { name = "TerraformVoxels" }
@@ -220,8 +219,6 @@ public partial class TerraformManager {
     }
 
     private void RebuildChunkFromHistory(ChunkRenderData data) {
-        ResetChunkDigState(data);
-
         Vector3 origin = data.MeshObject.transform.position;
         int chunkOriginX = Mathf.RoundToInt(origin.x);
         int chunkOriginZ = Mathf.RoundToInt(origin.z);
@@ -232,6 +229,8 @@ public partial class TerraformManager {
             if (data.Collider != null) data.Collider.sharedMesh = null;
             return;
         }
+
+        ResetChunkDigState(data);
 
         if (_pendingPersistence != null
             && _pendingPersistence.TryGetValue(chunkKey, out var savedEntry)
