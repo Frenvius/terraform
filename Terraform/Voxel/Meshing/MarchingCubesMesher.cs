@@ -36,7 +36,6 @@ public static class MarchingCubesMesher {
         int edgeMask = MarchingCubesTables.EdgeTable[cubeIndex];
         if (edgeMask == 0) return;
 
-        System.Array.Clear(_edgeVerts, 0, _edgeVerts.Length);
         var edges = MarchingCubesTables.Edges;
         for (int e = 0; e < 12; e++) {
             if ((edgeMask & (1 << e)) == 0) continue;
