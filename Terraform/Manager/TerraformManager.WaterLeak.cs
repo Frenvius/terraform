@@ -7,7 +7,7 @@ namespace Terraform.Patches;
 
 public partial class TerraformManager {
     private readonly Dictionary<int, GameObject> _waterLeaks = new();
-    private readonly Dictionary<int, List<GameObject>> _leakTopVfx = new();
+    private readonly Dictionary<long, GameObject> _leakTopVfx = new();
     private readonly Dictionary<int, List<LidCircle>> _leakCircleCache = new();
     private readonly Dictionary<long, GameObject> _waterfallInstances = new();
     private readonly Dictionary<long, GameObject> _waterfallBottomAnchors = new();
@@ -50,7 +50,7 @@ public partial class TerraformManager {
             foreach (var c in circles) aliveWaterfallKeys.Add(WaterfallKey(c.CenterX, c.CenterZ));
 
             EnsureWaterfallObjects(chunkId, circles);
-            EnsureLeakTopVfx(chunkId, circles);
+            EnsureLeakTopVfx(circles);
             FireNewLeakSplashes(circles);
             _leakCircleCache[chunkId] = circles;
         }
@@ -67,7 +67,6 @@ public partial class TerraformManager {
             foreach (var key in dead) {
                 if (_waterLeaks.TryGetValue(key, out var go) && go != null) Destroy(go);
                 _waterLeaks.Remove(key);
-                DestroyTopVfx(key);
                 _leakCircleCache.Remove(key);
             }
         }
@@ -230,12 +229,19 @@ public partial class TerraformManager {
                 (stale ??= new List<long>()).Add(kv.Key);
             }
         }
+        foreach (var kv in _leakTopVfx) {
+            if (!aliveKeys.Contains(kv.Key) || kv.Value == null) {
+                (stale ??= new List<long>()).Add(kv.Key);
+            }
+        }
         if (stale == null) return;
         foreach (var key in stale) {
             if (_waterfallInstances.TryGetValue(key, out var go) && go != null) Destroy(go);
             _waterfallInstances.Remove(key);
             if (_waterfallBottomAnchors.TryGetValue(key, out var anchor) && anchor != null) Destroy(anchor);
             _waterfallBottomAnchors.Remove(key);
+            if (_leakTopVfx.TryGetValue(key, out var vfx) && vfx != null) Destroy(vfx);
+            _leakTopVfx.Remove(key);
         }
     }
 
@@ -324,31 +330,23 @@ public partial class TerraformManager {
         anchor.transform.position = new Vector3(c.CenterX, c.BottomY, c.CenterZ);
     }
 
-    private void EnsureLeakTopVfx(int chunkId, List<LidCircle> circles) {
-        if (!_leakTopVfx.TryGetValue(chunkId, out var list)) {
-            list = new List<GameObject>();
-            _leakTopVfx[chunkId] = list;
-        }
-        foreach (var v in list) if (v != null) Destroy(v);
-        list.Clear();
-
+    private void EnsureLeakTopVfx(List<LidCircle> circles) {
         var prefab = GetVfxWaterSurfacePrefab();
         if (prefab == null) return;
 
         float waterY = ZoneSystem.instance != null ? ZoneSystem.instance.m_waterLevel : 30f;
         foreach (var c in circles) {
+            long key = WaterfallKey(c.CenterX, c.CenterZ);
             var pos = new Vector3(c.CenterX, waterY + 0.02f, c.CenterZ);
+            if (_leakTopVfx.TryGetValue(key, out var existing) && existing != null) {
+                existing.transform.position = pos;
+                continue;
+            }
             var inst = Instantiate(prefab, pos, Quaternion.identity);
             inst.name = "TerraformLeakTopVfx";
             StripNetworkComponents(inst);
-            list.Add(inst);
+            _leakTopVfx[key] = inst;
         }
-    }
-
-    private void DestroyTopVfx(int chunkId) {
-        if (!_leakTopVfx.TryGetValue(chunkId, out var list)) return;
-        foreach (var v in list) if (v != null) Destroy(v);
-        _leakTopVfx.Remove(chunkId);
     }
 
     private void FireNewLeakSplashes(List<LidCircle> circles) {
@@ -411,7 +409,7 @@ public partial class TerraformManager {
         }
         _waterLeaks.Clear();
         foreach (var kv in _leakTopVfx) {
-            foreach (var v in kv.Value) if (v != null) Destroy(v);
+            if (kv.Value != null) Destroy(kv.Value);
         }
         _leakTopVfx.Clear();
         foreach (var kv in _waterfallInstances) {

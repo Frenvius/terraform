@@ -6,13 +6,6 @@ namespace Terraform.Patches;
 public partial class TerraformManager {
     private const float WaterDigReachMargin = 0.5f;
 
-    public void RebuildAllWaterMeshes() {
-        foreach (var kv in _waters) {
-            RebuildWaterMeshFromHistory(kv.Value);
-        }
-        RefreshWaterLeaks();
-    }
-
     private void RebuildWaterMeshFromHistory(WaterRenderData data) {
         if (data == null) return;
         var original = data.OriginalSharedMesh;

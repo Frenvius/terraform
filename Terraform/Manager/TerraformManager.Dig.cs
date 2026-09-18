@@ -82,13 +82,15 @@ public partial class TerraformManager {
 
             BakeDigNavForChunk(kv.Key, chunkOriginX, chunkOriginZ);
 
+            if (_waters.TryGetValue(kv.Key, out var water)) RebuildWaterMeshFromHistory(water);
+
             if (VerboseLogs) DebugLog(
                 $"Dig world=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) " +
                 $"mode={mode} terrainH={data.TerrainHeight:F1} " +
                 $"history={digs.Count}");
         }
 
-        RebuildAllWaterMeshes();
+        RefreshWaterLeaks();
 
         if (chunkHit > 0) PlaceLinksForDig(worldPos, radius);
 
