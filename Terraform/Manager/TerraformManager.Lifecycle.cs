@@ -55,7 +55,7 @@ public partial class TerraformManager {
             data.Renderer.sharedMaterial = placeholderShader != null
                 ? new Material(placeholderShader) { color = Color.magenta }
                 : new Material(Shader.Find("Hidden/InternalErrorShader"));
-            data.Renderer.enabled = false;
+            SetChunkVisible(data, false);
             data.Renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.TwoSided;
             data.Renderer.receiveShadows    = true;
             data.Renderer.lightProbeUsage      = UnityEngine.Rendering.LightProbeUsage.Off;
@@ -77,6 +77,8 @@ public partial class TerraformManager {
                 fill.shadows        = LightShadows.None;
                 fill.cullingMask    = 1 << pieceLayer;
                 fill.renderMode     = LightRenderMode.ForcePixel;
+                fill.enabled        = data.Renderer.enabled;
+                data.FillLight      = fill;
             }
 
             int halfA = VoxelChunk.SIZE / 2;
@@ -226,7 +228,7 @@ public partial class TerraformManager {
         long chunkKey = ChunkKey(chunkOriginX, chunkOriginZ);
         if (!_chunkDigHistory.TryGetValue(chunkKey, out var digs) || digs.Count == 0) {
             data.Mesh.Clear();
-            data.Renderer.enabled = false;
+            SetChunkVisible(data, false);
             if (data.Collider != null) data.Collider.sharedMesh = null;
             return;
         }

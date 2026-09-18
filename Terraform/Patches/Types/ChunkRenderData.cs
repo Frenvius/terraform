@@ -11,6 +11,7 @@ public class ChunkRenderData {
     public MeshFilter Filter;
     public MeshRenderer Renderer;
     public MeshCollider Collider;
+    public Light FillLight;
     public Mesh Mesh;
     public float TerrainHeight;
     public readonly List<RenderFootprint> RenderFootprints = new();

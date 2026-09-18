@@ -12,7 +12,7 @@ public partial class TerraformManager {
         data.Mesh.Clear();
 
         if (meshData.Vertices.Count == 0) {
-            data.Renderer.enabled = false;
+            SetChunkVisible(data, false);
             if (data.Collider != null) data.Collider.sharedMesh = null;
             return;
         }
@@ -161,7 +161,7 @@ public partial class TerraformManager {
         long filtTicks = swFilt?.ElapsedTicks ?? 0;
 
         if (filteredIndices.Count == 0) {
-            data.Renderer.enabled = false;
+            SetChunkVisible(data, false);
             if (data.Collider != null) data.Collider.sharedMesh = null;
             DebugLog($"[mesh] chunk={data.Heightmap?.gameObject.name} all triangles filtered → renderer disabled");
             return;
@@ -214,7 +214,7 @@ public partial class TerraformManager {
 
         TryApplyTerrainMaterial(data);
 
-        data.Renderer.enabled = true;
+        SetChunkVisible(data, true);
 
         if (VerboseLogs) {
             float toMs(long t) => (float)(t * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
@@ -229,6 +229,11 @@ public partial class TerraformManager {
                 offsetAboveTerrain, aboveTerrainCount, maxOffset,
                 chimneyDropSamples, origin);
         }
+    }
+
+    private static void SetChunkVisible(ChunkRenderData data, bool visible) {
+        data.Renderer.enabled = visible;
+        if (data.FillLight != null) data.FillLight.enabled = visible;
     }
 
     private static bool TriangleOverlapsRenderFootprint(
