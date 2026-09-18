@@ -48,22 +48,6 @@ public partial class TerraformManager {
         return SampleSdfTri(data.Chunk, localX, localY, localZ) > 0f;
     }
 
-    private static bool[,] SmoothPunchedCells(bool[,] src, int rangeX, int rangeZ) {
-        bool[,] dst = new bool[rangeX, rangeZ];
-        for (int z = 0; z < rangeZ; z++)
-        for (int x = 0; x < rangeX; x++) {
-            int n = 0;
-            if (x > 0          && src[x - 1, z]) n++;
-            if (x < rangeX - 1 && src[x + 1, z]) n++;
-            if (z > 0          && src[x, z - 1]) n++;
-            if (z < rangeZ - 1 && src[x, z + 1]) n++;
-
-            if (src[x, z]) dst[x, z] = n >= 2;
-            else            dst[x, z] = n >= 3;
-        }
-        return dst;
-    }
-
     private static bool[,] BuildPunchedCellMask(
         int worldCellMinX,
         int worldCellMaxX,
@@ -85,9 +69,6 @@ public partial class TerraformManager {
             float dz = Mathf.Max(Mathf.Abs(cellCenterZ - worldPos.z) - 0.5f, 0f);
             mask[x, z] = (dx * dx + dz * dz) <= outerRadiusSq;
         }
-
-        for (int i = 0; i < SmoothingPasses; i++)
-            mask = SmoothPunchedCells(mask, rangeX, rangeZ);
 
         return mask;
     }
@@ -117,25 +98,6 @@ public partial class TerraformManager {
             if (ty - hitY < maxCeilingDelta) return true;
         }
         return false;
-    }
-
-    private void PaintTunnelDirt(Vector3 worldPos, float radius) {
-        float outerRadius = radius * OuterRadiusMultiplier;
-        const float paintBleed = 4f;
-        float paintRadius = outerRadius + paintBleed;
-
-        EnsureTerrainCompReflection();
-        foreach (var hm in FindObjectsByType<Heightmap>(FindObjectsSortMode.None)) {
-            if (hm.gameObject.name.Contains("lodMesh")) continue;
-            float halfSize = hm.m_width * hm.m_scale * 0.5f;
-            Vector3 hmPos  = hm.transform.position;
-            if (Mathf.Abs(worldPos.x - hmPos.x) > halfSize + paintRadius) continue;
-            if (Mathf.Abs(worldPos.z - hmPos.z) > halfSize + paintRadius) continue;
-
-            var tc = hm.GetAndCreateTerrainCompiler();
-            if (tc != null && _tcPaintClearedMethod != null) PaintDirtCleared(tc, worldPos, paintRadius);
-            hm.Poke();
-        }
     }
 
     private void PunchHoles(Heightmap _hitHm, Vector3 worldPos, float outerRadius, float paintRadius, float maxCeilingDelta,

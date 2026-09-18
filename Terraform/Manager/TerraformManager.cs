@@ -24,7 +24,6 @@ public partial class TerraformManager : MonoBehaviour {
     private const float NoiseFrequency        = 0.12f;
     private const float NoiseAmplitude        = 0.03f;
     private const float NoiseOffset           = 137.42f;
-    private const int   SmoothingPasses       = 0;
     private const float OuterRadiusMultiplier = 1.55f;
     private const float BowlRadiusMultiplier  = 0.65f;
     private const float ShelfDepthMultiplier  = 0.4f;
@@ -63,17 +62,8 @@ public partial class TerraformManager : MonoBehaviour {
         if (VerboseLogs) TerraformPlugin.Log.LogInfo(message);
     }
 
-    private static long CellKey(int worldX, int worldZ) =>
-        ((long)worldX << 32) ^ (uint)worldZ;
-
     private static long ChunkKey(int chunkOriginX, int chunkOriginZ) =>
         ((long)chunkOriginX << 32) ^ (uint)chunkOriginZ;
-
-    private static long Cell3DKey(int worldX, int worldY, int worldZ) =>
-        ((long)worldX << 32) | ((long)(ushort)worldY << 16) | (long)(ushort)(short)worldZ;
-
-    private static (int x, int y, int z) DecodeCell3DKey(long key) =>
-        ((int)(key >> 32), (int)((key >> 16) & 0xFFFFL), (short)(key & 0xFFFFL));
 
     private void Awake() {
         if (Instance != null && Instance != this) {
@@ -162,16 +152,8 @@ public partial class TerraformManager : MonoBehaviour {
     public bool IsPlayerInVoxelCavity(Vector3 worldPos) {
         var hm = Heightmap.FindHeightmap(worldPos);
         if (hm == null) return false;
-
         if (!Heightmap.GetHeight(worldPos, out float terrainY)) return false;
-        if (worldPos.y >= terrainY - UndergroundEnterMarginY) return false;
-
-        if (_chunks.TryGetValue(hm.GetInstanceID(), out var data)
-            && data.Renderer != null
-            && data.Renderer.enabled)
-            return true;
-
-        return IsPositionInKnownDig(worldPos);
+        return IsPlayerInVoxelCavity(worldPos, hm, terrainY);
     }
 
     public bool ShouldSuppressUnderWorldCheck(Vector3 worldPos) {

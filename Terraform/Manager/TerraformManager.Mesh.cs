@@ -101,14 +101,12 @@ public partial class TerraformManager {
         var filteredIndices = new List<int>(srcIndices.Count);
         int droppedChimney = 0, droppedDegenerate = 0;
         int keptRimRecovered  = 0;
-        int dropChimneyAllOutside = 0;
-        int dropChimneyAllInside  = 0;
         int dropAboveTinyEps      = 0;
         int droppedOutsideFootprint = 0;
         int droppedSurfaceOverlap = 0;
         const int kMaxChimneySamples = 15;
         const float kNearSurfaceDepth = 0.18f;
-        var chimneyDropSamples = new List<(int i0, int i1, int i2, bool in0, bool in1, bool in2)>(kMaxChimneySamples);
+        var chimneyDropSamples = new List<(int i0, int i1, int i2)>(kMaxChimneySamples);
         const float kAbsoluteMaxAboveTerrain = 15f;
         const float kMaxTriangleYSpan = 20f;
         for (int t = 0; t + 2 < srcIndices.Count; t += 3) {
@@ -130,13 +128,13 @@ public partial class TerraformManager {
             if (maxVertexAbove > kAbsoluteMaxAboveTerrain && !isTerraformEdit) {
                 droppedChimney++;
                 if (chimneyDropSamples.Count < kMaxChimneySamples)
-                    chimneyDropSamples.Add((i0, i1, i2, false, false, false));
+                    chimneyDropSamples.Add((i0, i1, i2));
                 continue;
             }
             if (ySpan > kMaxTriangleYSpan && !isTerraformEdit) {
                 droppedChimney++;
                 if (chimneyDropSamples.Count < kMaxChimneySamples)
-                    chimneyDropSamples.Add((i0, i1, i2, false, false, false));
+                    chimneyDropSamples.Add((i0, i1, i2));
                 continue;
             }
             if (aboveTerrain[i0] && aboveTerrain[i1] && aboveTerrain[i2]) {
@@ -146,7 +144,7 @@ public partial class TerraformManager {
                     if (offsetAboveTerrain[i0] < 0.01f && offsetAboveTerrain[i1] < 0.01f && offsetAboveTerrain[i2] < 0.01f)
                         dropAboveTinyEps++;
                     if (chimneyDropSamples.Count < kMaxChimneySamples)
-                        chimneyDropSamples.Add((i0, i1, i2, false, false, false));
+                        chimneyDropSamples.Add((i0, i1, i2));
                     continue;
                 }
                 keptRimRecovered++;
@@ -154,7 +152,7 @@ public partial class TerraformManager {
             if (!overlapsFootprint) {
                 droppedOutsideFootprint++;
                 if (chimneyDropSamples.Count < kMaxChimneySamples)
-                    chimneyDropSamples.Add((i0, i1, i2, false, false, false));
+                    chimneyDropSamples.Add((i0, i1, i2));
                 continue;
             }
             float offA = offsetAboveTerrain[i0], offB = offsetAboveTerrain[i1], offC = offsetAboveTerrain[i2];
@@ -164,7 +162,7 @@ public partial class TerraformManager {
                     data, origin, a, b, c, vertexStates[i0], vertexStates[i1], vertexStates[i2])) {
                 droppedSurfaceOverlap++;
                 if (chimneyDropSamples.Count < kMaxChimneySamples)
-                    chimneyDropSamples.Add((i0, i1, i2, false, false, false));
+                    chimneyDropSamples.Add((i0, i1, i2));
                 continue;
             }
             if (Vector3.Cross(b - a, c - a).sqrMagnitude < 1e-6f) {
@@ -184,8 +182,7 @@ public partial class TerraformManager {
             return;
         }
 
-        const float kShelfBias          = 0f;
-        const float kShelfDepthRange    = 1.75f;
+        const float kShelfDepthRange   = 1.75f;
         const float kTerrainNormalBlend = 1.0f;
         var sdfNormals = new Vector3[verts.Length];
         for (int i = 0; i < verts.Length; i++) {
@@ -200,29 +197,23 @@ public partial class TerraformManager {
                     n = Vector3.Slerp(n, terrainN.normalized, kTerrainNormalBlend * falloff);
                     n.Normalize();
                 }
-                n.y += kShelfBias * falloff;
                 n.Normalize();
             }
             sdfNormals[i] = n;
         }
 
-        var allVerts    = verts;
-        var allUvs      = uvs;
-        var allColors   = colors;
-        var allNormals  = sdfNormals;
-
         data.Mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
-        data.Mesh.vertices    = allVerts;
-        data.Mesh.uv          = allUvs;
-        data.Mesh.colors32    = allColors;
+        data.Mesh.vertices    = verts;
+        data.Mesh.uv          = uvs;
+        data.Mesh.colors32    = colors;
         data.Mesh.subMeshCount = 1;
         data.Mesh.SetTriangles(filteredIndices, 0, calculateBounds: false);
-        data.Mesh.normals     = allNormals;
+        data.Mesh.normals     = sdfNormals;
         data.Mesh.RecalculateTangents();
         data.Mesh.RecalculateBounds();
 
         DebugLog(
-            $"[mesh] verts={allVerts.Length} totalTris={filteredIndices.Count / 3}");
+            $"[mesh] verts={verts.Length} totalTris={filteredIndices.Count / 3}");
 
         if (data.Collider != null) {
             data.Collider.sharedMesh = null;
@@ -240,9 +231,9 @@ public partial class TerraformManager {
         }
 
         if (VerboseLogs) {
-            LogMeshDiagnostics(data, allVerts, filteredIndices,
+            LogMeshDiagnostics(data, verts, filteredIndices,
                 droppedChimney, droppedDegenerate, keptRimRecovered,
-                dropChimneyAllOutside, dropChimneyAllInside, dropAboveTinyEps,
+                dropAboveTinyEps,
                 droppedOutsideFootprint, droppedSurfaceOverlap,
                 offsetAboveTerrain, aboveTerrainCount, maxOffset,
                 chimneyDropSamples, origin);
@@ -372,10 +363,10 @@ public partial class TerraformManager {
 
     private static void LogMeshDiagnostics(ChunkRenderData data, Vector3[] verts, List<int> indices,
                                             int droppedChimney, int droppedDegenerate, int keptRimRecovered,
-                                            int dropChimneyAllOutside, int dropChimneyAllInside, int dropAboveTinyEps,
+                                            int dropAboveTinyEps,
                                             int droppedOutsideFootprint, int droppedSurfaceOverlap,
                                             float[] offsetAboveTerrain, int aboveTerrainCount, float maxOffset,
-                                            List<(int i0, int i1, int i2, bool in0, bool in1, bool in2)> chimneyDropSamples, Vector3 origin) {
+                                            List<(int i0, int i1, int i2)> chimneyDropSamples, Vector3 origin) {
         var used = new bool[verts.Length];
         for (int i = 0; i < indices.Count; i++) used[indices[i]] = true;
 
@@ -423,7 +414,7 @@ public partial class TerraformManager {
             $"badNormals={badN} badTangents={badT} degenerateTris={degenerate}");
 
         for (int s = 0; s < chimneyDropSamples.Count; s++) {
-            var (i0, i1, i2, _, _, _) = chimneyDropSamples[s];
+            var (i0, i1, i2) = chimneyDropSamples[s];
             Vector3 w0 = verts[i0] + origin;
             Vector3 w1 = verts[i1] + origin;
             Vector3 w2 = verts[i2] + origin;

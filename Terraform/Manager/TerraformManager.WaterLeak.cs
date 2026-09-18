@@ -324,15 +324,6 @@ public partial class TerraformManager {
         anchor.transform.position = new Vector3(c.CenterX, c.BottomY, c.CenterZ);
     }
 
-    private static Transform FindChildByName(Transform root, string name) {
-        if (root.name == name) return root;
-        for (int i = 0; i < root.childCount; i++) {
-            var found = FindChildByName(root.GetChild(i), name);
-            if (found != null) return found;
-        }
-        return null;
-    }
-
     private void EnsureLeakTopVfx(int chunkId, List<LidCircle> circles) {
         if (!_leakTopVfx.TryGetValue(chunkId, out var list)) {
             list = new List<GameObject>();
@@ -364,7 +355,7 @@ public partial class TerraformManager {
         var prefab = GetFxWaterImpactBigPrefab();
         if (prefab == null) return;
         foreach (var c in circles) {
-            long key = SplashKey(c.CenterX, c.CenterZ);
+            long key = WaterfallKey(c.CenterX, c.CenterZ);
             if (!_firedSplashKeys.Add(key)) continue;
             var pos = new Vector3(c.CenterX, c.BottomY + 0.1f, c.CenterZ);
             var inst = Instantiate(prefab, pos, Quaternion.identity);
@@ -372,12 +363,6 @@ public partial class TerraformManager {
             inst.transform.localScale = Vector3.one * LeakSplashScale;
             StripNetworkComponents(inst);
         }
-    }
-
-    private static long SplashKey(float worldX, float worldZ) {
-        int x = Mathf.RoundToInt(worldX * 4f);
-        int z = Mathf.RoundToInt(worldZ * 4f);
-        return ((long)x << 32) | (uint)z;
     }
 
     private static void StripNetworkComponents(GameObject go) {
