@@ -32,15 +32,16 @@ public static class HolePunchSystem {
         return Enumerable.Empty<(int, int)>();
     }
 
-    public static IEnumerable<(int x, int y)> GetCollisionHoles(Heightmap hm) {
-        if (_collisionHoles.TryGetValue(hm.GetInstanceID(), out var set))
-            return set;
-        return Enumerable.Empty<(int, int)>();
+    public static bool TryGetHoles(Heightmap hm, out HashSet<(int x, int y)> holes) {
+        return _holes.TryGetValue(hm.GetInstanceID(), out holes);
     }
 
-    internal static void FilterHoleTriangles(Heightmap hm, Mesh mesh, IEnumerable<(int x, int y)> holeSet) {
+    public static bool TryGetCollisionHoles(Heightmap hm, out HashSet<(int x, int y)> holes) {
+        return _collisionHoles.TryGetValue(hm.GetInstanceID(), out holes);
+    }
+
+    internal static void FilterHoleTriangles(Heightmap hm, Mesh mesh, HashSet<(int x, int y)> holes) {
         if (mesh == null) return;
-        var holes = holeSet as HashSet<(int x, int y)> ?? new HashSet<(int x, int y)>(holeSet);
         if (holes.Count == 0) return;
 
         var indices = mesh.GetIndices(0);
@@ -94,7 +95,8 @@ public static class HolePunchSystem {
 [HarmonyPatch(typeof(Heightmap), "RebuildCollisionMesh")]
 public static class Heightmap_RebuildCollisionMesh_Patch {
     static void Postfix(Heightmap __instance, Mesh ___m_collisionMesh, MeshCollider ___m_collider) {
-        HolePunchSystem.FilterHoleTriangles(__instance, ___m_collisionMesh, HolePunchSystem.GetCollisionHoles(__instance));
+        if (!HolePunchSystem.TryGetCollisionHoles(__instance, out var holes)) return;
+        HolePunchSystem.FilterHoleTriangles(__instance, ___m_collisionMesh, holes);
         if (___m_collider != null)
             ___m_collider.sharedMesh = ___m_collisionMesh;
     }
@@ -103,6 +105,7 @@ public static class Heightmap_RebuildCollisionMesh_Patch {
 [HarmonyPatch(typeof(Heightmap), "RebuildRenderMesh")]
 public static class Heightmap_RebuildRenderMesh_Patch {
     static void Postfix(Heightmap __instance, Mesh ___m_renderMesh) {
-        HolePunchSystem.FilterHoleTriangles(__instance, ___m_renderMesh, HolePunchSystem.GetHoles(__instance));
+        if (!HolePunchSystem.TryGetHoles(__instance, out var holes)) return;
+        HolePunchSystem.FilterHoleTriangles(__instance, ___m_renderMesh, holes);
     }
 }
