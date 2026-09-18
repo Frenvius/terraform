@@ -70,17 +70,36 @@ public partial class TerraformManager {
         action(hit);
     }
 
-    public void PerformRaiseAt(Vector3 worldPos) {
-        PerformRaiseAt(worldPos, Vector3.up);
+    private bool _clientDigWarned;
+
+    public bool DiggingBlockedAsClient() {
+        if (ZNet.instance == null || ZNet.instance.IsServer()) return false;
+        if (!_clientDigWarned) {
+            _clientDigWarned = true;
+            TerraformPlugin.Log.LogWarning("Voxel digging is disabled while connected to a server as a client.");
+        }
+        return true;
+    }
+
+    private bool CanDigAt(Vector3 worldPos) {
+        if (DiggingBlockedAsClient()) return false;
+        float radius = Configs.ModConfig.BrushSize?.Value ?? 1.5f;
+        if (!PrivateArea.CheckAccess(worldPos, radius)) return false;
+        return !Location.IsInsideNoBuildLocation(worldPos);
+    }
+
+    public bool PerformRaiseAt(Vector3 worldPos) {
+        return PerformRaiseAt(worldPos, Vector3.up);
     }
 
     private void PerformRaiseAt(RaycastHit hit) {
         PerformRaiseAt(hit.point, hit.normal);
     }
 
-    private void PerformRaiseAt(Vector3 worldPos, Vector3 surfaceNormal) {
+    private bool PerformRaiseAt(Vector3 worldPos, Vector3 surfaceNormal) {
+        if (!CanDigAt(worldPos)) return false;
         var hm = Heightmap.FindHeightmap(worldPos);
-        if (hm == null) return;
+        if (hm == null) return false;
 
         float radius = Configs.ModConfig.BrushSize.Value * RaiseRadiusMultiplier;
         DeriveModePunchParams(DigMode.Raise, radius, out float punchRadius, out float maxRaiseHeight);
@@ -90,19 +109,21 @@ public partial class TerraformManager {
         Dig(worldPos, radius, DigMode.Raise, surfaceNormal);
 
         if (_showDebugGrid) { RefreshDebugGrids(); RefreshDebugChunkWalls(); }
+        return true;
     }
 
-    public void PerformDigAt(Vector3 worldPos) {
-        PerformDigAt(worldPos, null);
+    public bool PerformDigAt(Vector3 worldPos) {
+        return PerformDigAt(worldPos, null);
     }
 
     private void PerformDigAt(RaycastHit hit) {
         PerformDigAt(hit.point, hit.collider);
     }
 
-    private void PerformDigAt(Vector3 worldPos, Collider hitCollider) {
+    private bool PerformDigAt(Vector3 worldPos, Collider hitCollider) {
+        if (!CanDigAt(worldPos)) return false;
         var hm = Heightmap.FindHeightmap(worldPos);
-        if (hm == null) return;
+        if (hm == null) return false;
 
         float radius = Configs.ModConfig.BrushSize.Value;
 
@@ -131,19 +152,22 @@ public partial class TerraformManager {
         Dig(digPos, radius, mode);
 
         if (_showDebugGrid) { RefreshDebugGrids(); RefreshDebugChunkWalls(); }
+        return true;
     }
 
-    public void PerformSmoothAt(Vector3 worldPos) {
+    public bool PerformSmoothAt(Vector3 worldPos) {
+        if (!CanDigAt(worldPos)) return false;
         var hm = Heightmap.FindHeightmap(worldPos);
-        if (hm == null) return;
+        if (hm == null) return false;
 
         var player = Player.m_localPlayer;
-        if (player == null) return;
+        if (player == null) return false;
 
         Vector3 target = new Vector3(worldPos.x, player.transform.position.y, worldPos.z);
         Dig(target, SmoothRadius, DigMode.Smooth);
 
         if (_showDebugGrid) { RefreshDebugGrids(); RefreshDebugChunkWalls(); }
+        return true;
     }
 
     private void PerformSmoothAt(RaycastHit hit) {

@@ -13,21 +13,13 @@ public static class Attack_SpawnOnHitTerrain_Patch {
 
         if (weapon == null) return true;
         if (weapon.m_shared.m_skillType != Skills.SkillType.Pickaxes) return true;
-        if (TerraformManager.Instance == null) return true;
+        var manager = TerraformManager.Instance;
+        if (manager == null) return true;
         if (character == null || character != Player.m_localPlayer) return true;
+        if (manager.DiggingBlockedAsClient()) return true;
 
-        float radius = Configs.ModConfig.BrushSize?.Value ?? 1.5f;
-        if (!PrivateArea.CheckAccess(hitPoint, radius)) {
-            __result = null;
-            return false;
-        }
-        if (Location.IsInsideNoBuildLocation(hitPoint)) {
-            __result = null;
-            return false;
-        }
-
-        PickaxeEffectFx.PlayRockBreakEffects(hitPoint, Quaternion.identity);
-        TerraformManager.Instance.PerformDigAt(hitPoint);
+        if (manager.PerformDigAt(hitPoint))
+            PickaxeEffectFx.PlayRockBreakEffects(hitPoint, Quaternion.identity);
         __result = null;
         return false;
     }
