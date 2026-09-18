@@ -322,9 +322,12 @@ public partial class TerraformManager {
     }
 
     private static float SampleSdfTri(Terraform.Voxel.Core.VoxelChunk chunk, float x, float y, float z) {
-        int x0 = (int)Mathf.Floor(x);
-        int y0 = (int)Mathf.Floor(y);
-        int z0 = (int)Mathf.Floor(z);
+        x = Mathf.Clamp(x, 0f, VoxelChunk.SIZE);
+        y = Mathf.Clamp(y, 0f, VoxelChunk.SIZE);
+        z = Mathf.Clamp(z, 0f, VoxelChunk.SIZE);
+        int x0 = Mathf.Min((int)Mathf.Floor(x), VoxelChunk.SIZE - 1);
+        int y0 = Mathf.Min((int)Mathf.Floor(y), VoxelChunk.SIZE - 1);
+        int z0 = Mathf.Min((int)Mathf.Floor(z), VoxelChunk.SIZE - 1);
         float fx = x - x0, fy = y - y0, fz = z - z0;
         float c000 = chunk.Get(x0,     y0,     z0    ).Value;
         float c100 = chunk.Get(x0 + 1, y0,     z0    ).Value;
@@ -345,9 +348,9 @@ public partial class TerraformManager {
 
     private static Vector3 ComputeSdfNormal(Terraform.Voxel.Core.VoxelChunk chunk, float x, float y, float z) {
         const float h = 1.0f;
-        float gx = SampleSdfTri(chunk, x + h, y, z) - SampleSdfTri(chunk, x - h, y, z);
-        float gy = SampleSdfTri(chunk, x, y + h, z) - SampleSdfTri(chunk, x, y - h, z);
-        float gz = SampleSdfTri(chunk, x, y, z + h) - SampleSdfTri(chunk, x, y, z - h);
+        float gx = (SampleSdfTri(chunk, x + h, y, z) - SampleSdfTri(chunk, x - h, y, z)) * CentralSpanRatio(x, h);
+        float gy = (SampleSdfTri(chunk, x, y + h, z) - SampleSdfTri(chunk, x, y - h, z)) * CentralSpanRatio(y, h);
+        float gz = (SampleSdfTri(chunk, x, y, z + h) - SampleSdfTri(chunk, x, y, z - h)) * CentralSpanRatio(z, h);
         Vector3 grad = new Vector3(gx, gy, gz);
         if (grad.sqrMagnitude < 1e-8f) grad = new Vector3(1e-3f, 1f, 1e-3f);
         var n = grad.normalized;
@@ -359,6 +362,12 @@ public partial class TerraformManager {
             n.Normalize();
         }
         return n;
+    }
+
+    private static float CentralSpanRatio(float c, float h) {
+        if (c - h >= 0f && c + h <= VoxelChunk.SIZE) return 1f;
+        float span = Mathf.Min(c + h, VoxelChunk.SIZE) - Mathf.Max(c - h, 0f);
+        return span > 1e-6f ? 2f * h / span : 1f;
     }
 
     private static void LogMeshDiagnostics(ChunkRenderData data, Vector3[] verts, List<int> indices,
