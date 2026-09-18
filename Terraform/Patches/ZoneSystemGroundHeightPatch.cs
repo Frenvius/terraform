@@ -82,6 +82,8 @@ internal static class VoxelGroundProbe {
 [HarmonyPatch(typeof(ZoneSystem), nameof(ZoneSystem.GetGroundHeight), new[] { typeof(Vector3) })]
 public static class ZoneSystem_GetGroundHeight_Patch {
     static bool Prefix(Vector3 p, ref float __result) {
+        var manager = TerraformManager.Instance;
+        if (manager == null || !manager.HasDigsAround(p)) return true;
         __result = VoxelGroundProbe.NearestGroundY(p, out float y) ? y : p.y;
         return false;
     }
@@ -95,6 +97,8 @@ public static class ZoneSystem_GetGroundHeight_Out_Patch {
     }
 
     static bool Prefix(Vector3 p, ref float height, ref bool __result) {
+        var manager = TerraformManager.Instance;
+        if (manager == null || !manager.HasDigsAround(p)) return true;
         if (VoxelGroundProbe.NearestGroundY(p, out float y)) {
             height = y; __result = true;
         } else {

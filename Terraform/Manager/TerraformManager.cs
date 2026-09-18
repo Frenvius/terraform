@@ -146,6 +146,19 @@ public partial class TerraformManager : MonoBehaviour {
         return snapshot;
     }
 
+    public bool HasDigsAround(Vector3 worldPos) {
+        if (_chunkDigHistory.Count == 0) return false;
+        const int zoneSize = Terraform.Voxel.Core.VoxelChunk.SIZE;
+        const int halfZone = zoneSize / 2;
+        int originX = Mathf.FloorToInt((worldPos.x + halfZone) / zoneSize) * zoneSize - halfZone;
+        int originZ = Mathf.FloorToInt((worldPos.z + halfZone) / zoneSize) * zoneSize - halfZone;
+        for (int dz = -zoneSize; dz <= zoneSize; dz += zoneSize)
+        for (int dx = -zoneSize; dx <= zoneSize; dx += zoneSize) {
+            if (_chunkDigHistory.ContainsKey(ChunkKey(originX + dx, originZ + dz))) return true;
+        }
+        return false;
+    }
+
     public bool IsPlayerInVoxelCavity(Vector3 worldPos) {
         var hm = Heightmap.FindHeightmap(worldPos);
         if (hm == null) return false;
