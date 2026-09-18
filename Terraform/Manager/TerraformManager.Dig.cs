@@ -80,8 +80,6 @@ public partial class TerraformManager {
             RebuildMesh(data);
             if (swMesh != null) meshTicks += swMesh.ElapsedTicks;
 
-            BakeDigNavForChunk(kv.Key, chunkOriginX, chunkOriginZ);
-
             if (_waters.TryGetValue(kv.Key, out var water)) RebuildWaterMeshFromHistory(water);
 
             if (VerboseLogs) DebugLog(
@@ -92,7 +90,10 @@ public partial class TerraformManager {
 
         RefreshWaterLeaks();
 
-        if (chunkHit > 0) PlaceLinksForDig(worldPos, radius);
+        if (chunkHit > 0) {
+            float reach = radius * OuterRadiusMultiplier + ExtendedPunchBleed;
+            MarkNavDirty(worldPos.x - reach, worldPos.z - reach, worldPos.x + reach, worldPos.z + reach);
+        }
 
         if (chunkHit == 0)
             TerraformPlugin.Log.LogWarning(

@@ -18,8 +18,6 @@ public partial class TerraformManager {
                 var d = _chunks[k];
                 if (d?.MeshObject != null) Destroy(d.MeshObject);
                 if (d?.Mesh       != null) Destroy(d.Mesh);
-                RemoveLinksForChunk(k);
-                RemoveDigNavForChunk(k);
                 _chunks.Remove(k);
                 _pendingBuildHash.Remove(k);
                 _pendingBuildSince.Remove(k);
@@ -253,10 +251,7 @@ public partial class TerraformManager {
         }
 
         RebuildMesh(data);
-        int chunkId = data.Heightmap.GetInstanceID();
-        RemoveLinksForChunk(chunkId);
-        foreach (var dig in digs) PlaceLinksAtBoundary(dig.WorldPos, dig.Radius, chunkId);
-        RebuildChunkDigNav(chunkId, digs);
+        MarkNavDirty(chunkOriginX, chunkOriginZ, chunkOriginX + VoxelChunk.SIZE, chunkOriginZ + VoxelChunk.SIZE);
     }
 
     private static void AddRenderFootprintFromDig(ChunkRenderData data, DigRecord dig) {

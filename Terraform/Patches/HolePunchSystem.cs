@@ -26,6 +26,11 @@ public static class HolePunchSystem {
             && set.Contains((cellX, cellY));
     }
 
+    public static bool IsCollisionHole(Heightmap hm, int cellX, int cellY) {
+        return _collisionHoles.TryGetValue(hm.GetInstanceID(), out var set)
+            && set.Contains((cellX, cellY));
+    }
+
     public static IEnumerable<(int x, int y)> GetHoles(Heightmap hm) {
         if (_holes.TryGetValue(hm.GetInstanceID(), out var set))
             return set;

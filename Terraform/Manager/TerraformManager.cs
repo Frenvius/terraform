@@ -78,6 +78,7 @@ public partial class TerraformManager : MonoBehaviour {
 
     private void OnDestroy() {
         DestroyAllWaterLeaks();
+        RemoveAllRimLinks();
         UnsubscribeWorldSave();
         if (Instance == this) Instance = null;
     }
@@ -215,6 +216,7 @@ public partial class TerraformManager : MonoBehaviour {
             _scanTimer = 0f;
             ScanHeightmaps();
         }
+        FlushNavDirty();
         UpdateUndergroundCollision();
         HandleInput();
     }
