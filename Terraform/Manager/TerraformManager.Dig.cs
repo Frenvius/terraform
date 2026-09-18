@@ -5,6 +5,9 @@ using Terraform.Voxel.Core;
 namespace Terraform.Patches;
 
 public partial class TerraformManager {
+    private static bool IsCarvingMode(DigMode mode) =>
+        mode == DigMode.Surface || mode == DigMode.UndergroundTunnel || mode == DigMode.OpenHoleDeepen;
+
     private static float SurfacePunchMaxDelta(float radius) =>
         radius * (1f + ShelfDepthMultiplier) + MinCeilingThickness;
 
@@ -55,6 +58,24 @@ public partial class TerraformManager {
             var swCarve = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
             CarveCrater(data, worldPos, radius, mode, record.Normal);
             if (swCarve != null) carveTicks += swCarve.ElapsedTicks;
+
+            if (IsCarvingMode(mode)) {
+                DeriveModePunchParams(mode, radius, out float refineRadius, out _);
+                int refMinX = Mathf.FloorToInt(worldPos.x - refineRadius);
+                int refMaxX = Mathf.FloorToInt(worldPos.x + refineRadius);
+                int refMinZ = Mathf.FloorToInt(worldPos.z - refineRadius);
+                int refMaxZ = Mathf.FloorToInt(worldPos.z + refineRadius);
+                int refined = RefinePunchFromVoxel(data, refMinX, refMaxX, refMinZ, refMaxZ);
+                if (refined > 0) {
+                    data.Heightmap.Poke(false);
+                    if (ClutterSystem.instance != null) {
+                        float grassRadius = refineRadius * Mathf.Sqrt(2f) + 0.5f;
+                        ClutterSystem.instance.ResetGrass(worldPos, grassRadius);
+                    }
+                    DebugLog($"[refine-punch] hm={data.Heightmap.gameObject.name} added={refined}");
+                }
+            }
+
             var swMesh = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
             RebuildMesh(data);
             if (swMesh != null) meshTicks += swMesh.ElapsedTicks;

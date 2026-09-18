@@ -1,8 +1,53 @@
+using System.Collections.Generic;
 using UnityEngine;
+using Terraform.Voxel.Core;
 
 namespace Terraform.Patches;
 
 public partial class TerraformManager {
+    private int RefinePunchFromVoxel(ChunkRenderData data, int wcMinX, int wcMaxX, int wcMinZ, int wcMaxZ) {
+        var hm = data.Heightmap;
+        if (hm == null || hm.gameObject.name.Contains("lodMesh")) return 0;
+
+        Vector3 origin = data.MeshObject.transform.position;
+        float halfSize = hm.m_width * hm.m_scale * 0.5f;
+        Vector3 hmPos  = hm.transform.position;
+        float hmCellOriginX = hmPos.x - halfSize;
+        float hmCellOriginZ = hmPos.z - halfSize;
+        float invScale = 1f / hm.m_scale;
+        var heights = GetHeightsArray(hm);
+
+        int punched = 0;
+        for (int wcZ = wcMinZ; wcZ <= wcMaxZ; wcZ++)
+        for (int wcX = wcMinX; wcX <= wcMaxX; wcX++) {
+            int hx = Mathf.FloorToInt((wcX - hmCellOriginX) * invScale);
+            int hz = Mathf.FloorToInt((wcZ - hmCellOriginZ) * invScale);
+            if (hx < 0 || hz < 0 || hx >= hm.m_width || hz >= hm.m_width) continue;
+            if (HolePunchSystem.IsHole(hm, hx, hz)) continue;
+            if (!CellGroundRemovedByVoxel(data, heights, origin, wcX, wcZ)) continue;
+            HolePunchSystem.PunchHole(hm, hx, hz, affectsCollision: true);
+            punched++;
+        }
+        return punched;
+    }
+
+    private static bool CellGroundRemovedByVoxel(
+        ChunkRenderData data, List<float> heights, Vector3 origin, int wcX, int wcZ) {
+        float wx = wcX + 0.5f;
+        float wz = wcZ + 0.5f;
+        float terrainY = SampleHeightmapMeshYCached(data.Heightmap, heights, new Vector3(wx, 0f, wz), data.TerrainHeight);
+
+        float localX = wx - origin.x;
+        float localZ = wz - origin.z;
+        if (localX < 0f || localX > VoxelChunk.SIZE || localZ < 0f || localZ > VoxelChunk.SIZE) return false;
+
+        float localY = terrainY - origin.y - SeamProbeDepth;
+        if (localY < 0f) localY = 0f;
+        if (localY > VoxelChunk.SIZE) return false;
+
+        return SampleSdfTri(data.Chunk, localX, localY, localZ) > 0f;
+    }
+
     private static bool[,] SmoothPunchedCells(bool[,] src, int rangeX, int rangeZ) {
         bool[,] dst = new bool[rangeX, rangeZ];
         for (int z = 0; z < rangeZ; z++)

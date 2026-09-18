@@ -34,6 +34,7 @@ public partial class TerraformManager : MonoBehaviour {
     private const float SeamInset             = 0.04f;
     private const float ShallowAboveKeep      = 0.35f;
     private const float SeamSnapDepth         = 0.85f;
+    private const float SeamProbeDepth        = 0.4f;
     private const float MinCeilingThickness   = 1.0f;
     private const float RaiseRadiusMultiplier = 0.5f;
 
