@@ -13,9 +13,12 @@ public partial class TerraformManager {
     private static FieldInfo  _materialInstanceField;
     private static FieldInfo  _paintMaskField;
     private static FieldInfo  _cornerBiomesField;
-    private static MethodInfo _getBiomeColorByEnum;
 
     private static FieldInfo _renderMeshField2;
+
+    private static readonly TerrainOp.Settings DirtPaintSettings = new() { m_paintType = TerrainModifier.PaintType.Dirt };
+    private static readonly object[] PaintClearedArgs = new object[3];
+    private static readonly object[] SaveArgs = { false };
 
     private static void EnsureTerrainCompReflection() {
         if (_saveMethod != null) return;
@@ -23,7 +26,18 @@ public partial class TerraformManager {
         var flags = BindingFlags.Instance | BindingFlags.NonPublic;
         _saveMethod            = t.GetMethod("Save",            flags);
         _tcPaintClearedMethod  = AccessTools.Method(typeof(TerrainComp), "PaintCleared",
-            new[] { typeof(Vector3), typeof(float), typeof(TerrainModifier.PaintType), typeof(bool), typeof(bool) });
+            new[] { typeof(Vector3), typeof(Vector3), typeof(TerrainOp.Settings) });
+        if (_saveMethod == null || _tcPaintClearedMethod == null)
+            TerraformPlugin.Log.LogError("[reflection] TerrainComp.Save/PaintCleared not found - dig paint disabled");
+    }
+
+    private static void PaintDirtCleared(TerrainComp tc, Vector3 worldPos, float radius) {
+        DirtPaintSettings.m_paintRadius = radius;
+        PaintClearedArgs[0] = worldPos;
+        PaintClearedArgs[1] = Vector3.zero;
+        PaintClearedArgs[2] = DirtPaintSettings;
+        _tcPaintClearedMethod.Invoke(tc, PaintClearedArgs);
+        _saveMethod?.Invoke(tc, SaveArgs);
     }
 
     private static void EnsureHeightmapReflection() {
@@ -40,25 +54,15 @@ public partial class TerraformManager {
         return _heightsField?.GetValue(hm) as List<float>;
     }
 
-    private static System.Array GetCornerBiomes(Heightmap hm) {
+    private static BiomeSector[] GetCornerBiomes(Heightmap hm) {
         if (_cornerBiomesField == null) {
             _cornerBiomesField = AccessTools.Field(typeof(Heightmap), "m_cornerBiomes");
         }
-        return _cornerBiomesField?.GetValue(hm) as System.Array;
+        return _cornerBiomesField?.GetValue(hm) as BiomeSector[];
     }
 
-    private static Color32 GetBiomeColorReflected(object biomeEnumValue) {
-        if (_getBiomeColorByEnum == null) {
-            foreach (var m in typeof(Heightmap).GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)) {
-                if (m.Name != "GetBiomeColor") continue;
-                var ps = m.GetParameters();
-                if (ps.Length == 1 && ps[0].ParameterType.IsEnum) {
-                    _getBiomeColorByEnum = m;
-                    break;
-                }
-            }
-        }
-        if (_getBiomeColorByEnum == null) return new Color32(0, 0, 0, 0);
-        return (Color32)_getBiomeColorByEnum.Invoke(null, new[] { biomeEnumValue });
+    private static Color32 CornerBiomeColor(BiomeSector[] cornerBiomes, int corner) {
+        var sector = cornerBiomes?[corner];
+        return sector != null ? Heightmap.GetBiomeColor(sector) : new Color32(0, 0, 0, 0);
     }
 }

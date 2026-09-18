@@ -133,13 +133,8 @@ public partial class TerraformManager {
             if (Mathf.Abs(worldPos.z - hmPos.z) > halfSize + paintRadius) continue;
 
             var tc = hm.GetAndCreateTerrainCompiler();
-            if (tc != null && _tcPaintClearedMethod != null) {
-                _tcPaintClearedMethod.Invoke(tc, new object[] {
-                    worldPos, paintRadius, TerrainModifier.PaintType.Dirt, false, false
-                });
-                _saveMethod?.Invoke(tc, null);
-            }
-            hm.Poke(false);
+            if (tc != null && _tcPaintClearedMethod != null) PaintDirtCleared(tc, worldPos, paintRadius);
+            hm.Poke();
         }
     }
 
@@ -177,12 +172,7 @@ public partial class TerraformManager {
             bool didSomethingHere = punchedHere > 0;
             if (doPaint && !hmIsLod && punchedHere > 0) {
                 var tc = hm.GetAndCreateTerrainCompiler();
-                if (tc != null && _tcPaintClearedMethod != null) {
-                    _tcPaintClearedMethod.Invoke(tc, new object[] {
-                        worldPos, thisPaintRadius, TerrainModifier.PaintType.Dirt, false, false
-                    });
-                    _saveMethod?.Invoke(tc, null);
-                }
+                if (tc != null && _tcPaintClearedMethod != null) PaintDirtCleared(tc, worldPos, thisPaintRadius);
             }
 
             if (!didSomethingHere) continue;
@@ -191,7 +181,7 @@ public partial class TerraformManager {
                 DebugLog($"  punched {punchedHere} cells on hm={hm.gameObject.name} pos={hmPos} scale={hm.m_scale} width={hm.m_width}");
             }
 
-            hm.Poke(false);
+            hm.Poke();
         }
 
         if (ClutterSystem.instance != null) {
@@ -290,7 +280,7 @@ public partial class TerraformManager {
         }
 
         if (totalPunched > 0) {
-            hm.Poke(false);
+            hm.Poke();
             DebugLog($"[replay-punch-all] hm={hm.gameObject.name} digsConsidered={digsConsidered} punched={totalPunched}");
         }
     }

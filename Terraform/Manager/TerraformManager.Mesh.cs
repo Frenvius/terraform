@@ -20,10 +20,10 @@ public partial class TerraformManager {
         Vector3 origin = data.MeshObject.transform.position;
         var heights = GetHeightsArray(data.Heightmap);
         var cornerBiomes = GetCornerBiomes(data.Heightmap);
-        Color32 biome00 = cornerBiomes != null ? GetBiomeColorReflected(cornerBiomes.GetValue(0)) : new Color32(0, 0, 0, 0);
-        Color32 biome10 = cornerBiomes != null ? GetBiomeColorReflected(cornerBiomes.GetValue(1)) : new Color32(0, 0, 0, 0);
-        Color32 biome01 = cornerBiomes != null ? GetBiomeColorReflected(cornerBiomes.GetValue(2)) : new Color32(0, 0, 0, 0);
-        Color32 biome11 = cornerBiomes != null ? GetBiomeColorReflected(cornerBiomes.GetValue(3)) : new Color32(0, 0, 0, 0);
+        Color32 biome00 = CornerBiomeColor(cornerBiomes, 0);
+        Color32 biome10 = CornerBiomeColor(cornerBiomes, 1);
+        Color32 biome01 = CornerBiomeColor(cornerBiomes, 2);
+        Color32 biome11 = CornerBiomeColor(cornerBiomes, 3);
 
         var swSamp = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
         var verts  = new Vector3[meshData.Vertices.Count];

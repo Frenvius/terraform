@@ -373,7 +373,7 @@ public partial class TerraformManager {
                 _renderMeshField2.SetValue(hm, null);
                 affected++;
             } else {
-                hm.Poke(false);
+                hm.Poke();
                 affected++;
             }
         }

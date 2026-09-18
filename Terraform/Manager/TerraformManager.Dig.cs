@@ -67,7 +67,7 @@ public partial class TerraformManager {
                 int refMaxZ = Mathf.FloorToInt(worldPos.z + refineRadius);
                 int refined = RefinePunchFromVoxel(data, refMinX, refMaxX, refMinZ, refMaxZ);
                 if (refined > 0) {
-                    data.Heightmap.Poke(false);
+                    data.Heightmap.Poke();
                     if (ClutterSystem.instance != null) {
                         float grassRadius = refineRadius * Mathf.Sqrt(2f) + 0.5f;
                         ClutterSystem.instance.ResetGrass(worldPos, grassRadius);

@@ -21,13 +21,13 @@ public static class TerraformPersistence {
         var worldField = AccessTools.Field(typeof(ZNet), "m_world");
         if (worldField == null) return null;
         if (worldField.GetValue(null) is not World world) return null;
-        if (string.IsNullOrEmpty(world.m_fileName)) return null;
+        if (string.IsNullOrEmpty(world.m_worldName)) return null;
 
-        string localDir = World.GetWorldSavePath(FileHelpers.FileSource.Local);
+        string localDir = SaveSystem.GetWorldsSaveRootPath(FileHelpers.FileSource.Local);
         if (string.IsNullOrEmpty(localDir)) return null;
 
         try { Directory.CreateDirectory(localDir); } catch { }
-        return Path.Combine(localDir, world.m_fileName + ".terraform.bin");
+        return Path.Combine(localDir, world.m_worldName + ".terraform.bin");
     }
 
     public static Dictionary<long, ChunkPersistence> Load() {
