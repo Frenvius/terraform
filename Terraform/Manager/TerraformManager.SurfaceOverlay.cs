@@ -9,9 +9,9 @@ public partial class TerraformManager {
         Vector3 a,
         Vector3 b,
         Vector3 c,
-        float offA,
-        float offB,
-        float offC) {
+        CellState stateA,
+        CellState stateB,
+        CellState stateC) {
         if (data.Heightmap == null) return false;
 
         Vector3 cross = Vector3.Cross(b - a, c - a);
@@ -29,9 +29,9 @@ public partial class TerraformManager {
 
         int intactSamples = 0;
         int punchedSamples = 0;
-        CountSample(hm, wa, ref intactSamples, ref punchedSamples);
-        CountSample(hm, wb, ref intactSamples, ref punchedSamples);
-        CountSample(hm, wc, ref intactSamples, ref punchedSamples);
+        CountState(stateA, ref intactSamples, ref punchedSamples);
+        CountState(stateB, ref intactSamples, ref punchedSamples);
+        CountState(stateC, ref intactSamples, ref punchedSamples);
         CountSample(hm, (wa + wb) * 0.5f, ref intactSamples, ref punchedSamples);
         CountSample(hm, (wb + wc) * 0.5f, ref intactSamples, ref punchedSamples);
         CountSample(hm, (wc + wa) * 0.5f, ref intactSamples, ref punchedSamples);
@@ -54,8 +54,35 @@ public partial class TerraformManager {
         return HolePunchSystem.IsHole(target, x, z) ? CellState.Punched : CellState.Intact;
     }
 
+    private static CellState ClassifyVertexCells(
+        Heightmap hm, Vector3 origin, float localX, float localZ, out bool onPunchSeam) {
+        const float gridLineTolerance = 0.005f;
+        int xLo = Mathf.FloorToInt(localX - gridLineTolerance);
+        int xHi = Mathf.FloorToInt(localX + gridLineTolerance);
+        int zLo = Mathf.FloorToInt(localZ - gridLineTolerance);
+        int zHi = Mathf.FloorToInt(localZ + gridLineTolerance);
+
+        bool anyPunched = false, anyIntact = false, anyOutside = false;
+        for (int cz = zLo; cz <= zHi; cz++)
+        for (int cx = xLo; cx <= xHi; cx++) {
+            switch (ClassifyPoint(hm, new Vector3(origin.x + cx + 0.5f, 0f, origin.z + cz + 0.5f))) {
+                case CellState.Punched: anyPunched = true; break;
+                case CellState.Intact:  anyIntact  = true; break;
+                default:                anyOutside = true; break;
+            }
+        }
+
+        onPunchSeam = anyPunched && (anyIntact || anyOutside);
+        if (anyPunched) return CellState.Punched;
+        return anyIntact ? CellState.Intact : CellState.Outside;
+    }
+
     private static void CountSample(Heightmap hm, Vector3 worldPos, ref int intact, ref int punched) {
-        switch (ClassifyPoint(hm, worldPos)) {
+        CountState(ClassifyPoint(hm, worldPos), ref intact, ref punched);
+    }
+
+    private static void CountState(CellState state, ref int intact, ref int punched) {
+        switch (state) {
             case CellState.Intact:  intact++;  break;
             case CellState.Punched: punched++; break;
         }

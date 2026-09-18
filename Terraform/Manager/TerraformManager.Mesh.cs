@@ -39,8 +39,10 @@ public partial class TerraformManager {
         var terrainNormals = new Vector3[meshData.Vertices.Count];
         var aboveTerrain = new bool[meshData.Vertices.Count];
         var offsetAboveTerrain = new float[meshData.Vertices.Count];
+        var vertexStates = new CellState[meshData.Vertices.Count];
         float maxOffset = float.NegativeInfinity;
         int aboveTerrainCount = 0;
+        int seamWelded = 0, seamPreviouslyUnwelded = 0;
         for (int i = 0; i < verts.Length; i++) {
             var v = meshData.Vertices[i];
             var worldXZ = new Vector3(origin.x + v.X, 0f, origin.z + v.Z);
@@ -60,10 +62,17 @@ public partial class TerraformManager {
             bool needsHeightmapState = Mathf.Abs(offset) < ShallowAboveKeep
                 || (offset < 0f && offset > -SeamSnapDepth)
                 || offset > 0f;
+            bool onPunchSeam = false;
             if (needsHeightmapState)
-                heightmapState = ClassifyPoint(data.Heightmap, new Vector3(worldXZ.x, terrainY, worldXZ.z));
+                heightmapState = ClassifyVertexCells(data.Heightmap, origin, v.X, v.Z, out onPunchSeam);
+            vertexStates[i] = heightmapState;
 
-            if (Mathf.Abs(offset) < ShallowAboveKeep) {
+            if (onPunchSeam) {
+                clampedY = localTerrainY;
+                seamWelded++;
+                if (VerboseLogs && ClassifyPoint(data.Heightmap, worldXZ) != CellState.Punched)
+                    seamPreviouslyUnwelded++;
+            } else if (Mathf.Abs(offset) < ShallowAboveKeep) {
                 clampedY = heightmapState == CellState.Intact
                     ? localTerrainY - SeamInset
                     : localTerrainY;
@@ -151,7 +160,8 @@ public partial class TerraformManager {
             float offA = offsetAboveTerrain[i0], offB = offsetAboveTerrain[i1], offC = offsetAboveTerrain[i2];
             bool triangleNearOrAboveSurface =
                 offA >= -kNearSurfaceDepth && offB >= -kNearSurfaceDepth && offC >= -kNearSurfaceDepth;
-            if (triangleNearOrAboveSurface && IsSurfaceOverlayOnIntactHeightmap(data, origin, a, b, c, offA, offB, offC)) {
+            if (triangleNearOrAboveSurface && IsSurfaceOverlayOnIntactHeightmap(
+                    data, origin, a, b, c, vertexStates[i0], vertexStates[i1], vertexStates[i2])) {
                 droppedSurfaceOverlap++;
                 if (chimneyDropSamples.Count < kMaxChimneySamples)
                     chimneyDropSamples.Add((i0, i1, i2, false, false, false));
@@ -226,6 +236,7 @@ public partial class TerraformManager {
         if (VerboseLogs) {
             float toMs(long t) => (float)(t * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
             DebugLog($"[perf] RebuildMesh mc={toMs(mcTicks):F1}ms samp={toMs(sampTicks):F1}ms filt={toMs(filtTicks):F1}ms tris={filteredIndices.Count / 3}");
+            DebugLog($"[seam] welded={seamWelded} previouslyUnwelded={seamPreviouslyUnwelded}");
         }
 
         if (VerboseLogs) {
