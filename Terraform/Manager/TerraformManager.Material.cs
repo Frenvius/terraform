@@ -4,6 +4,7 @@ namespace Terraform.Patches;
 
 public partial class TerraformManager {
     private static bool _materialDumped;
+    private static MaterialPropertyBlock _terrainRendererProperties;
 
     private static void DumpMaterialOnce(Heightmap hm) {
         if (_materialDumped) return;
@@ -60,5 +61,15 @@ public partial class TerraformManager {
         if (liveMat == null) return;
 
         data.Renderer.sharedMaterial = liveMat;
+        MirrorTerrainRendererProperties(data);
+    }
+
+    private static void MirrorTerrainRendererProperties(ChunkRenderData data) {
+        var terrainRenderer = data.Heightmap.GetComponent<MeshRenderer>();
+        if (terrainRenderer == null) return;
+
+        _terrainRendererProperties ??= new MaterialPropertyBlock();
+        terrainRenderer.GetPropertyBlock(_terrainRendererProperties);
+        data.Renderer.SetPropertyBlock(_terrainRendererProperties);
     }
 }
