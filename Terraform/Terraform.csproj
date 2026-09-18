@@ -118,6 +118,7 @@
     <Compile Include="Patches\PickaxeEffectFx.cs" />
     <Compile Include="Patches\HolePunchSystem.cs" />
     <Compile Include="Patches\WaterVolumeWaterSurfacePatch.cs" />
+    <Compile Include="Patches\CustomItemsPatch.cs" />
     <Compile Include="Patches\Types\ChunkRenderData.cs" />
     <Compile Include="Patches\Types\DigMode.cs" />
     <Compile Include="Patches\Types\DigRecord.cs" />
@@ -142,10 +143,11 @@
     <Compile Include="Manager\TerraformManager.WaterLeak.cs" />
     <Compile Include="Manager\TerraformManager.WaterLeakDebug.cs" />
     <Compile Include="Persistence\TerraformPersistence.cs" />
+    <Compile Include="Assets\TerraformBundle.cs" />
     <Compile Include="Assets\WaterfallAssets.cs" />
     <Compile Include="Assets\UVScroller.cs" />
-    <EmbeddedResource Include="Resources\terraform_waterfall" Condition="Exists('Resources\terraform_waterfall')">
-      <LogicalName>Terraform.Resources.terraform_waterfall</LogicalName>
+    <EmbeddedResource Include="Resources\terraform" Condition="Exists('Resources\terraform')">
+      <LogicalName>Terraform.Resources.terraform</LogicalName>
     </EmbeddedResource>
     <Compile Include="Voxel\Core\Voxel.cs" />
     <Compile Include="Voxel\Core\VoxelChunk.cs" />

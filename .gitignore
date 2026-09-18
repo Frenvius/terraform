@@ -79,5 +79,6 @@ $RECYCLE.BIN/
 # Unity project
 TerraformUnity/
 
-# Asset bundle is built locally — not committed
+# Asset bundle build byproducts
 Terraform/Resources/Resources*
+Terraform/Resources/*.manifest
