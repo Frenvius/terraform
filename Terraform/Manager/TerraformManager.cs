@@ -111,6 +111,7 @@ public partial class TerraformManager : MonoBehaviour {
     }
 
     private void OnWorldSaveStarted() {
+        Water.PlacedWater.SaveAll();
         var snapshot = BuildPersistenceSnapshot();
         TerraformPersistence.Save(snapshot);
     }

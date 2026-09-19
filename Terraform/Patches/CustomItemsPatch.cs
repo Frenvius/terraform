@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using HarmonyLib;
 using Terraform.Assets;
+using Terraform.Water;
 using UnityEngine;
 
 namespace Terraform.Patches;
@@ -18,7 +19,9 @@ public static class CustomItems {
             _prefabs = new List<GameObject>();
             foreach (var name in ItemPrefabNames) {
                 var prefab = TerraformBundle.LoadPrefab(name);
-                if (prefab != null) _prefabs.Add(prefab);
+                if (prefab == null) continue;
+                WaterBucket.Configure(prefab);
+                _prefabs.Add(prefab);
             }
             return _prefabs;
         }
@@ -56,6 +59,7 @@ public static class ZNetScene_Awake_RegisterItems_Patch {
     static void Prefix(ZNetScene __instance) {
         CustomItems.ResolveMockMaterials();
         CustomItems.AddMissing(__instance.m_prefabs);
+        PlacedWater.Register(__instance);
     }
 }
 
