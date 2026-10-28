@@ -20,11 +20,20 @@ public static class CustomItems {
             foreach (var name in ItemPrefabNames) {
                 var prefab = TerraformBundle.Load<GameObject>(name);
                 if (prefab == null) continue;
+                if (!HasItemData(prefab)) {
+                    TerraformPlugin.Log.LogError($"[items] '{name}' has no usable ItemDrop data in the bundle (scripts missing or stale at bundle build); not registered");
+                    continue;
+                }
                 WaterBucket.Configure(prefab);
                 _prefabs.Add(prefab);
             }
             return _prefabs;
         }
+    }
+
+    private static bool HasItemData(GameObject prefab) {
+        var itemDrop = prefab.GetComponent<ItemDrop>();
+        return itemDrop != null && itemDrop.m_itemData?.m_shared != null;
     }
 
     public static void AddMissing(List<GameObject> target) {

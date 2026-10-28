@@ -6,4 +6,5 @@ public enum DigMode {
     OpenHoleDeepen = 2,
     Raise = 3,
     Smooth = 4,
+    Level = 5,
 }

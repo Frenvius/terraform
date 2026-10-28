@@ -7,4 +7,6 @@ public struct DigRecord {
     public Vector3 Normal;
     public float   Radius;
     public DigMode Mode;
+    public bool    Square;
+    public float   Height;
 }

@@ -244,7 +244,7 @@ public partial class TerraformManager {
         } else {
             int replayed = 0;
             foreach (var dig in digs) {
-                CarveCrater(data, dig.WorldPos, dig.Radius, dig.Mode, dig.Normal.sqrMagnitude > 0.001f ? dig.Normal : Vector3.up);
+                CarveCrater(data, dig);
                 replayed++;
             }
             DebugLog($"  replayed {replayed} digs onto new chunk");
@@ -262,6 +262,7 @@ public partial class TerraformManager {
                 apronRadius = dig.Radius * OuterRadiusMultiplier + ExtendedPunchBleed;
                 break;
             case DigMode.Smooth:
+            case DigMode.Level:
                 apronRadius = dig.Radius;
                 break;
             default:

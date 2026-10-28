@@ -97,16 +97,21 @@ public partial class TerraformManager {
     }
 
     private bool PerformRaiseAt(Vector3 worldPos, Vector3 surfaceNormal) {
+        return PerformRaiseAt(worldPos, surfaceNormal, Configs.ModConfig.BrushSize.Value * RaiseRadiusMultiplier, 0f);
+    }
+
+    private bool PerformRaiseAt(Vector3 worldPos, Vector3 surfaceNormal, float radius, float height) {
         if (!CanDigAt(worldPos)) return false;
         var hm = Heightmap.FindHeightmap(worldPos);
         if (hm == null) return false;
 
-        float radius = Configs.ModConfig.BrushSize.Value * RaiseRadiusMultiplier;
         DeriveModePunchParams(DigMode.Raise, radius, out float punchRadius, out float maxRaiseHeight);
         float outerRadius = radius * OuterRadiusMultiplier;
 
         PunchHoles(hm, worldPos, punchRadius, outerRadius, maxRaiseHeight, affectsCollision: false, doPaint: false);
-        Dig(worldPos, radius, DigMode.Raise, surfaceNormal);
+        Dig(new DigRecord {
+            WorldPos = worldPos, Normal = surfaceNormal.normalized, Radius = radius, Mode = DigMode.Raise, Height = height
+        });
 
         if (_showDebugGrid) { RefreshDebugGrids(); RefreshDebugChunkWalls(); }
         return true;

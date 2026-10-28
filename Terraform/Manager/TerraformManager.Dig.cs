@@ -32,9 +32,13 @@ public partial class TerraformManager {
     }
 
     public void Dig(Vector3 worldPos, float radius, DigMode mode, Vector3 normal) {
-        var record = new DigRecord {
-            WorldPos = worldPos, Normal = normal.normalized, Radius = radius, Mode = mode
-        };
+        Dig(new DigRecord { WorldPos = worldPos, Normal = normal.normalized, Radius = radius, Mode = mode });
+    }
+
+    private void Dig(DigRecord record) {
+        Vector3 worldPos = record.WorldPos;
+        float radius     = record.Radius;
+        DigMode mode     = record.Mode;
         var swTotal = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
         int chunkHit = 0;
         long carveTicks = 0, meshTicks = 0;
@@ -56,7 +60,7 @@ public partial class TerraformManager {
 
             chunkHit++;
             var swCarve = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
-            CarveCrater(data, worldPos, radius, mode, record.Normal);
+            CarveCrater(data, record);
             if (swCarve != null) carveTicks += swCarve.ElapsedTicks;
 
             if (IsCarvingMode(mode)) {
@@ -105,18 +109,24 @@ public partial class TerraformManager {
         }
     }
 
-    private void CarveCrater(ChunkRenderData data, Vector3 worldPos, float radius, DigMode mode, Vector3 normal) {
+    private void CarveCrater(ChunkRenderData data, DigRecord dig) {
         data.Chunk ??= new VoxelChunk();
-        RefreshPieceMask(worldPos, radius * OuterRadiusMultiplier + ExtendedPunchBleed + 1f);
+        RefreshPieceMask(dig.WorldPos, dig.Radius * OuterRadiusMultiplier + ExtendedPunchBleed + 1f);
 
-        if (mode == DigMode.Surface) {
-            CarveSurfaceCrater(data, worldPos, radius);
-        } else if (mode == DigMode.Raise) {
-            CarveRaiseMound(data, worldPos, radius, normal);
-        } else if (mode == DigMode.Smooth) {
-            CarveSmoothSphere(data, worldPos, radius);
-        } else {
-            CarvePickaxeSphere(data, worldPos);
+        switch (dig.Mode) {
+            case DigMode.Surface:
+                CarveSurfaceCrater(data, dig.WorldPos, dig.Radius);
+                break;
+            case DigMode.Raise:
+                CarveRaiseMound(data, dig);
+                break;
+            case DigMode.Smooth:
+            case DigMode.Level:
+                MoveSurfaceTowardPlane(data, dig);
+                break;
+            default:
+                CarvePickaxeSphere(data, dig.WorldPos);
+                break;
         }
 
         SubtractPieces(data);
@@ -313,7 +323,34 @@ public partial class TerraformManager {
         }
     }
 
-    private void CarveSmoothSphere(ChunkRenderData data, Vector3 worldPos, float radius) {
+    private enum SurfaceFalloff { SmoothCircle, FlatCircle, FlatSquare }
+
+    private static float SurfaceMoveWeight(SurfaceFalloff falloff, float dx, float dz, float radius) {
+        if (falloff == SurfaceFalloff.FlatSquare)
+            return Mathf.Abs(dx) <= radius && Mathf.Abs(dz) <= radius ? 1f : 0f;
+
+        float distXZ = Mathf.Sqrt(dx * dx + dz * dz);
+        if (distXZ > radius) return 0f;
+        if (falloff == SurfaceFalloff.FlatCircle) return 1f;
+        return 1f - Mathf.Pow(Mathf.Clamp01(distXZ / radius), SmoothPower);
+    }
+
+    private static float MaxSurfaceStep(SurfaceFalloff falloff) =>
+        falloff == SurfaceFalloff.SmoothCircle ? SmoothMaxStep : LevelMaxStep;
+
+    private static SurfaceFalloff FalloffFor(DigRecord dig) {
+        if (dig.Mode == DigMode.Smooth) return SurfaceFalloff.SmoothCircle;
+        return dig.Square ? SurfaceFalloff.FlatSquare : SurfaceFalloff.FlatCircle;
+    }
+
+    private static bool IsCeilingNormal(Vector3 normal) => normal.y < CeilingNormalMaxY;
+
+    private void MoveSurfaceTowardPlane(ChunkRenderData data, DigRecord dig) {
+        Vector3 worldPos       = dig.WorldPos;
+        float radius           = dig.Radius;
+        SurfaceFalloff falloff = FalloffFor(dig);
+        bool facesDown         = IsCeilingNormal(dig.Normal);
+        float maxStep  = MaxSurfaceStep(falloff);
         Vector3 origin = data.MeshObject.transform.position;
         int chunkOriginX = Mathf.RoundToInt(origin.x);
         int chunkOriginY = Mathf.RoundToInt(origin.y);
@@ -342,13 +379,7 @@ public partial class TerraformManager {
             int vz = worldVz - chunkOriginZ;
             if (vx < 0 || vx > VoxelChunk.SIZE || vz < 0 || vz > VoxelChunk.SIZE) continue;
 
-            float dxF = worldVx - worldPos.x;
-            float dzF = worldVz - worldPos.z;
-            float distXZ = Mathf.Sqrt(dxF * dxF + dzF * dzF);
-            if (distXZ > radius) continue;
-
-            float distNorm = distXZ / radius;
-            float weight   = 1f - Mathf.Pow(Mathf.Clamp01(distNorm), SmoothPower);
+            float weight = SurfaceMoveWeight(falloff, worldVx - worldPos.x, worldVz - worldPos.z, radius);
             if (weight <= 0f) continue;
 
             int bestY = -1;
@@ -357,9 +388,12 @@ public partial class TerraformManager {
             for (int y = VoxelChunk.SIZE - 1; y >= yFloor; y--) {
                 var vHere  = data.Chunk.Get(vx, y, vz);
                 var vAbove = data.Chunk.Get(vx, y + 1, vz);
-                if (vHere.Value >= 0f || vAbove.Value < 0f) continue;
-                float denom = vAbove.Value - vHere.Value;
-                float frac  = denom > 1e-6f ? -vHere.Value / denom : 0f;
+                bool crossing = facesDown
+                    ? vHere.Value >= 0f && vAbove.Value < 0f
+                    : vHere.Value < 0f && vAbove.Value >= 0f;
+                if (!crossing) continue;
+                float denom = vHere.Value - vAbove.Value;
+                float frac  = Mathf.Abs(denom) > 1e-6f ? vHere.Value / denom : 0f;
                 float surfaceWorldY = chunkOriginY + y + frac;
                 float d = Mathf.Abs(surfaceWorldY - targetY);
                 if (d < bestDist) {
@@ -372,8 +406,8 @@ public partial class TerraformManager {
 
             float surfaceY    = chunkOriginY + bestY + bestFrac;
             float deltaY      = (targetY - surfaceY) * weight;
-            if (deltaY >  SmoothMaxStep) deltaY =  SmoothMaxStep;
-            if (deltaY < -SmoothMaxStep) deltaY = -SmoothMaxStep;
+            if (deltaY >  maxStep) deltaY =  maxStep;
+            if (deltaY < -maxStep) deltaY = -maxStep;
             float newSurfaceY = surfaceY + deltaY;
 
             int bandLoWorld = Mathf.FloorToInt(Mathf.Min(surfaceY, newSurfaceY)) - 2;
@@ -385,7 +419,7 @@ public partial class TerraformManager {
 
             for (int yLocal = bandLo; yLocal <= bandHi; yLocal++) {
                 int worldY = chunkOriginY + yLocal;
-                float planeSdf = worldY - newSurfaceY;
+                float planeSdf = facesDown ? newSurfaceY - worldY : worldY - newSurfaceY;
                 if (planeSdf < -1f) planeSdf = -1f;
                 else if (planeSdf > 1f) planeSdf = 1f;
 
@@ -404,7 +438,7 @@ public partial class TerraformManager {
         if (VerboseLogs) {
             string hmName = data.Heightmap != null ? data.Heightmap.gameObject.name : "?";
             DebugLog(
-                $"[carve-smooth] hm={hmName} pos=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) r={radius:F2} " +
+                $"[carve-{falloff}] hm={hmName} pos=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) r={radius:F2} " +
                 $"target={targetY:F2} chunkOrigin=({chunkOriginX},{chunkOriginY},{chunkOriginZ}) " +
                 $"cols={columnsTouched} noSurface={columnsNoSurface} writes={writes}");
         }
@@ -475,16 +509,36 @@ public partial class TerraformManager {
         }
     }
 
-    private void CarveRaiseMound(ChunkRenderData data, Vector3 worldPos, float radius, Vector3 surfaceNormal) {
+    private void CarveRaiseMound(ChunkRenderData data, DigRecord dig) {
+        Vector3 worldPos      = dig.WorldPos;
+        float radius          = dig.Radius;
+        Vector3 surfaceNormal = dig.Normal;
         Vector3 origin = data.MeshObject.transform.position;
         int chunkOriginX = Mathf.RoundToInt(origin.x);
         int chunkOriginY = Mathf.RoundToInt(origin.y);
         int chunkOriginZ = Mathf.RoundToInt(origin.z);
 
         float outerRadius = radius * OuterRadiusMultiplier;
-        float verticalRadius = RaiseVerticalRadius(radius);
+        float verticalRadius = dig.Height > 0f ? dig.Height : RaiseVerticalRadius(radius);
+        float shapeScale     = Mathf.Min(verticalRadius, outerRadius);
         float apronRadius = outerRadius + ExtendedPunchBleed;
         Vector3 normal = surfaceNormal.sqrMagnitude > 0.001f ? surfaceNormal.normalized : Vector3.up;
+        float normalYSq = normal.y * normal.y;
+        float capHeight = Mathf.Min(verticalRadius, outerRadius);
+        Vector3 capCenterOffset = -normal * (outerRadius - capHeight);
+        float verticalExtent = dig.Height > 0f
+            ? Mathf.Abs(capCenterOffset.y) + outerRadius + 1f
+            : Mathf.Sqrt(outerRadius * outerRadius * (1f - normalYSq) +
+                         verticalRadius * verticalRadius * normalYSq) + 1f;
+
+        float EllipsoidMoundDistance(Vector3 delta) {
+            float axial = Vector3.Dot(delta, normal);
+            float radial = Mathf.Sqrt(Mathf.Max(0f, delta.sqrMagnitude - axial * axial));
+            float radialNorm = radial / Mathf.Max(outerRadius, 0.001f);
+            float axialNorm = axial / Mathf.Max(verticalRadius, 0.001f);
+            float density = radialNorm * radialNorm + axialNorm * axialNorm;
+            return MoundShapeDistance(Mathf.Sqrt(density), delta.magnitude, shapeScale);
+        }
 
         int worldCellMinX = Mathf.FloorToInt(worldPos.x - outerRadius);
         int worldCellMaxX = Mathf.FloorToInt(worldPos.x + outerRadius);
@@ -531,22 +585,19 @@ public partial class TerraformManager {
                 float voxHorizDist = Mathf.Sqrt(voxDx * voxDx + voxDz * voxDz);
 
                 int yMinLocal = Mathf.Max(ProtectedYLocalExclusive(chunkOriginY),
-                    Mathf.FloorToInt(worldPos.y - verticalRadius) - 1 - chunkOriginY);
+                    Mathf.FloorToInt(worldPos.y - verticalExtent) - 1 - chunkOriginY);
                 int yMaxLocal = Mathf.Min(VoxelChunk.SIZE,
-                    Mathf.CeilToInt(worldPos.y + verticalRadius) + 2 - chunkOriginY);
+                    Mathf.CeilToInt(worldPos.y + verticalExtent) + 2 - chunkOriginY);
 
                 for (int yLocal = yMinLocal; yLocal <= yMaxLocal; yLocal++) {
                     int worldY = chunkOriginY + yLocal;
                     Vector3 delta = new Vector3(voxDx, worldY - worldPos.y, voxDz);
-                    float axial = Vector3.Dot(delta, normal);
-                    float radialSq = Mathf.Max(0f, delta.sqrMagnitude - axial * axial);
-                    float radial = Mathf.Sqrt(radialSq);
-                    float radialNorm = radial / Mathf.Max(outerRadius, 0.001f);
-                    float axialNorm = axial / Mathf.Max(verticalRadius, 0.001f);
-                    float density = radialNorm * radialNorm + axialNorm * axialNorm;
-                    if (density > 1f) continue;
+                    float shapeDistance = dig.Height > 0f
+                        ? (delta - capCenterOffset).magnitude - outerRadius
+                        : EllipsoidMoundDistance(delta);
+                    if (shapeDistance >= 1f) continue;
 
-                    float sdf = Mathf.Clamp(density - 1f + 0.05f, -0.99f, 1f);
+                    float sdf = Mathf.Clamp(shapeDistance + 0.05f, -0.99f, 1f);
 
                     var v = data.Chunk.Get(vx, yLocal, vz);
                     bool isAtDefault = v.Value <= -1f + 1e-5f;
@@ -563,5 +614,10 @@ public partial class TerraformManager {
                 $"chunkOrigin=({chunkOriginX},{chunkOriginY},{chunkOriginZ}) " +
                 $"corners: touched={touchedCorners} outOfChunk={outOfChunk}");
         }
+    }
+
+    private static float MoundShapeDistance(float ellipsoidScale, float distanceFromCenter, float insideScale) {
+        if (ellipsoidScale < 1f) return (ellipsoidScale - 1f) * insideScale;
+        return distanceFromCenter * (1f - 1f / ellipsoidScale);
     }
 }

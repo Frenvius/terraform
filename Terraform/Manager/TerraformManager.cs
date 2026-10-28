@@ -45,6 +45,8 @@ public partial class TerraformManager : MonoBehaviour {
     private const float SmoothRadius   = 3f;
     private const float SmoothPower    = 3f;
     private const float SmoothMaxStep  = 0.5f;
+    private const float LevelMaxStep   = 8f;
+    private const float CeilingNormalMaxY = -0.3f;
 
     private const float ExtendedPunchBleed     = 2f;
     private const float CrossChunkPaintBleed   = 1.5f;

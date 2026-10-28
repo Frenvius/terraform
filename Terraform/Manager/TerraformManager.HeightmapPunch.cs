@@ -199,7 +199,7 @@ public partial class TerraformManager {
         foreach (var list in _chunkDigHistory.Values) {
             for (int i = 0; i < list.Count; i++) {
                 var dig = list[i];
-                if (dig.Mode == DigMode.Smooth) continue;
+                if (!PunchesHeightmap(dig.Mode)) continue;
                 DeriveModePunchParams(dig.Mode, dig.Radius, out float outerRadius, out _);
                 float grassRadius = outerRadius * Mathf.Sqrt(2f) + 0.5f;
                 ClutterSystem.instance.ResetGrass(dig.WorldPos, grassRadius);
@@ -222,7 +222,7 @@ public partial class TerraformManager {
         foreach (var list in _chunkDigHistory.Values) {
             for (int i = 0; i < list.Count; i++) {
                 var dig = list[i];
-                if (dig.Mode == DigMode.Smooth) continue;
+                if (!PunchesHeightmap(dig.Mode)) continue;
                 DeriveModePunchParams(dig.Mode, dig.Radius, out float outerRadius, out float maxCeilingDelta);
 
                 if (Mathf.Abs(dig.WorldPos.x - hmPos.x) > halfSize + outerRadius) continue;
@@ -246,6 +246,9 @@ public partial class TerraformManager {
             DebugLog($"[replay-punch-all] hm={hm.gameObject.name} digsConsidered={digsConsidered} punched={totalPunched}");
         }
     }
+
+    private static bool PunchesHeightmap(DigMode mode) =>
+        mode != DigMode.Smooth && mode != DigMode.Level;
 
     private static void DeriveModePunchParams(DigMode mode, float radius, out float outerRadius, out float maxCeilingDelta) {
         if (mode == DigMode.Surface) {

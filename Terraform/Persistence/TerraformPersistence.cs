@@ -16,7 +16,7 @@ public class ChunkPersistence {
 
 public static class TerraformPersistence {
     private const int Magic   = 0x4D465254;
-    private const int Version = 5;
+    private const int Version = 7;
     private const int FirstCompressedVersion = 5;
 
     private static bool s_newerVersionOnDisk;
@@ -100,6 +100,8 @@ public static class TerraformPersistence {
                     Normal   = normal,
                     Radius   = reader.ReadSingle(),
                     Mode     = (DigMode)reader.ReadInt32(),
+                    Square   = version >= 6 && reader.ReadBoolean(),
+                    Height   = version >= 7 ? reader.ReadSingle() : 0f,
                 };
                 entry.Digs.Add(rec);
                 totalRecords++;
@@ -182,6 +184,8 @@ public static class TerraformPersistence {
                 writer.Write(normal.z);
                 writer.Write(rec.Radius);
                 writer.Write((int)rec.Mode);
+                writer.Write(rec.Square);
+                writer.Write(rec.Height);
                 totalRecords++;
             }
 
