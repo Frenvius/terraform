@@ -99,7 +99,8 @@ public partial class TerraformManager {
 
         var swFilt = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
         var srcIndices = meshData.Indices;
-        var filteredIndices = new List<int>(srcIndices.Count);
+        var submeshes = new SubmeshSorter(data, heights, CollectPaintedBands(data), srcIndices.Count);
+        var surfaceIndices = submeshes.Surface;
         int droppedChimney = 0, droppedDegenerate = 0;
         int keptRimRecovered  = 0;
         int dropAboveTinyEps      = 0;
@@ -170,13 +171,14 @@ public partial class TerraformManager {
                 droppedDegenerate++;
                 continue;
             }
-            filteredIndices.Add(i0);
-            filteredIndices.Add(i1);
-            filteredIndices.Add(i2);
+            var target = submeshes.For((a + b + c) / 3f);
+            target.Add(i0);
+            target.Add(i1);
+            target.Add(i2);
         }
         long filtTicks = swFilt?.ElapsedTicks ?? 0;
 
-        if (filteredIndices.Count == 0) {
+        if (submeshes.IsEmpty) {
             SetChunkVisible(data, false);
             if (data.Collider != null) data.Collider.sharedMesh = null;
             DebugLog($"[mesh] chunk={data.Heightmap?.gameObject.name} all triangles filtered → renderer disabled");
@@ -207,14 +209,14 @@ public partial class TerraformManager {
         data.Mesh.vertices    = verts;
         data.Mesh.uv          = uvs;
         data.Mesh.colors32    = colors;
-        data.Mesh.subMeshCount = 1;
-        data.Mesh.SetTriangles(filteredIndices, 0, calculateBounds: false);
+        submeshes.ApplyTo(data);
         data.Mesh.normals     = sdfNormals;
         data.Mesh.RecalculateTangents();
         data.Mesh.RecalculateBounds();
+        SyncPaintBandMasks(data, submeshes.PaintedBands);
 
         DebugLog(
-            $"[mesh] verts={verts.Length} totalTris={filteredIndices.Count / 3}");
+            $"[mesh] verts={verts.Length} surfaceTris={surfaceIndices.Count / 3} undergroundTris={submeshes.UndergroundTriangleCount} paintBands={data.SubmeshPaintBands.Count}");
 
         if (data.Collider != null) {
             data.Collider.sharedMesh = null;
@@ -227,12 +229,12 @@ public partial class TerraformManager {
 
         if (VerboseLogs) {
             float toMs(long t) => (float)(t * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
-            DebugLog($"[perf] RebuildMesh mc={toMs(mcTicks):F1}ms samp={toMs(sampTicks):F1}ms filt={toMs(filtTicks):F1}ms tris={filteredIndices.Count / 3}");
+            DebugLog($"[perf] RebuildMesh mc={toMs(mcTicks):F1}ms samp={toMs(sampTicks):F1}ms filt={toMs(filtTicks):F1}ms tris={surfaceIndices.Count / 3}");
             DebugLog($"[seam] welded={seamWelded} previouslyUnwelded={seamPreviouslyUnwelded}");
         }
 
         if (VerboseLogs) {
-            LogMeshDiagnostics(data, verts, filteredIndices,
+            LogMeshDiagnostics(data, verts, surfaceIndices,
                 droppedChimney, droppedDegenerate, keptRimRecovered,
                 dropAboveTinyEps,
                 droppedOutsideFootprint, droppedSurfaceOverlap,

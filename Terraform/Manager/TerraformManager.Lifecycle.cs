@@ -18,6 +18,7 @@ public partial class TerraformManager {
                 var d = _chunks[k];
                 if (d?.MeshObject != null) Destroy(d.MeshObject);
                 if (d?.Mesh       != null) Destroy(d.Mesh);
+                if (d != null) DestroyPaintBandMasks(d);
                 _chunks.Remove(k);
                 _pendingBuildHash.Remove(k);
                 _pendingBuildSince.Remove(k);

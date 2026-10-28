@@ -42,6 +42,11 @@ public partial class TerraformManager {
         if (TryGetCeilingPlacement(opPos, out Vector3 ceilingPoint, out Vector3 ceilingNormal))
             return BeginCeilingOp(settings, ceilingPoint, ceilingNormal);
 
+        if (settings.m_paintCleared && IsUnderTerrainCeiling(opPos)) {
+            PaintUnderground(opPos, settings.m_paintRadius, settings.m_paintType);
+            settings.m_paintCleared = false;
+        }
+
         Vector3 target = LevelTarget(opPos, settings);
         var pass = new TerrainOpVoxelPass {
             Level         = settings.m_level  && HasVoxelSurfaceNear(target, settings.m_levelRadius),

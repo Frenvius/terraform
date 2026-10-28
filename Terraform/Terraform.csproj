@@ -141,6 +141,7 @@
     <Compile Include="Manager\TerraformManager.Underground.cs" />
     <Compile Include="Manager\TerraformManager.Input.cs" />
     <Compile Include="Manager\TerraformManager.TerrainOps.cs" />
+    <Compile Include="Manager\TerraformManager.UndergroundPaint.cs" />
     <Compile Include="Manager\TerraformManager.Dig.cs" />
     <Compile Include="Manager\TerraformManager.PieceMask.cs" />
     <Compile Include="Manager\TerraformManager.HeightmapPunch.cs" />

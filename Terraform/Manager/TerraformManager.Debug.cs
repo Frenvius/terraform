@@ -394,9 +394,9 @@ public partial class TerraformManager {
                 clone.DisableKeyword("_NORMALMAP");
                 if (clone.HasProperty("_Displacement")) clone.SetFloat("_Displacement", 0f);
                 if (clone.HasProperty("_BumpScale"))    clone.SetFloat("_BumpScale", 0f);
-                data.Renderer.sharedMaterial = clone;
+                SetVoxelMaterial(data, clone);
             } else {
-                data.Renderer.sharedMaterial = liveMat;
+                SetVoxelMaterial(data, liveMat);
             }
             swapped++;
         }

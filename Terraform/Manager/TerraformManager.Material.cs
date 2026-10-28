@@ -5,6 +5,7 @@ namespace Terraform.Patches;
 public partial class TerraformManager {
     private static bool _materialDumped;
     private static MaterialPropertyBlock _terrainRendererProperties;
+    private static readonly int ClearedMaskTexId = Shader.PropertyToID("_ClearedMaskTex");
 
     private static void DumpMaterialOnce(Heightmap hm) {
         if (_materialDumped) return;
@@ -50,7 +51,7 @@ public partial class TerraformManager {
 
         if (Instance != null && Instance._debugMagenta) {
             var debug = Instance.GetOrCreateDebugMaterial();
-            if (debug != null) data.Renderer.sharedMaterial = debug;
+            if (debug != null) SetVoxelMaterial(data, debug);
             return;
         }
 
@@ -60,8 +61,14 @@ public partial class TerraformManager {
         var liveMat = _materialInstanceField?.GetValue(data.Heightmap) as Material;
         if (liveMat == null) return;
 
-        data.Renderer.sharedMaterial = liveMat;
+        SetVoxelMaterial(data, liveMat);
         MirrorTerrainRendererProperties(data);
+    }
+
+    private static void SetVoxelMaterial(ChunkRenderData data, Material material) {
+        var materials = new Material[data.Mesh.subMeshCount];
+        for (int i = 0; i < materials.Length; i++) materials[i] = material;
+        data.Renderer.sharedMaterials = materials;
     }
 
     private static void MirrorTerrainRendererProperties(ChunkRenderData data) {
@@ -70,6 +77,13 @@ public partial class TerraformManager {
 
         _terrainRendererProperties ??= new MaterialPropertyBlock();
         terrainRenderer.GetPropertyBlock(_terrainRendererProperties);
-        data.Renderer.SetPropertyBlock(_terrainRendererProperties);
+        data.Renderer.SetPropertyBlock(_terrainRendererProperties, SurfaceSubmesh);
+        _terrainRendererProperties.SetTexture(ClearedMaskTexId, UndergroundDirtMask);
+        data.Renderer.SetPropertyBlock(_terrainRendererProperties, UndergroundSubmesh);
+        for (int i = 0; i < data.SubmeshPaintBands.Count; i++) {
+            if (!data.PaintBandMasks.TryGetValue(data.SubmeshPaintBands[i], out var mask)) continue;
+            _terrainRendererProperties.SetTexture(ClearedMaskTexId, mask);
+            data.Renderer.SetPropertyBlock(_terrainRendererProperties, FirstPaintBandSubmesh + i);
+        }
     }
 }

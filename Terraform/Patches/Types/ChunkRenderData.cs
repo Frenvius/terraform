@@ -14,6 +14,8 @@ public class ChunkRenderData {
     public MeshCollider Collider;
     public Light FillLight;
     public Mesh Mesh;
+    public readonly Dictionary<int, Texture2D> PaintBandMasks = new();
+    public readonly List<int> SubmeshPaintBands = new();
     public float TerrainHeight;
     public readonly List<RenderFootprint> RenderFootprints = new();
 }

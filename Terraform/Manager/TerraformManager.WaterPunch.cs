@@ -40,6 +40,10 @@ public partial class TerraformManager {
             return;
         }
 
+        _chunks.TryGetValue(data.Heightmap.GetInstanceID(), out var chunk);
+        var heights = chunk != null ? GetHeightsArray(chunk.Heightmap) : null;
+        Vector3 chunkOrigin = chunk != null ? chunk.MeshObject.transform.position : Vector3.zero;
+
         var localVerts = original.vertices;
         var filtered = new List<int>(originalIndices.Length);
         int dropped = 0, kept = 0;
@@ -62,10 +66,10 @@ public partial class TerraformManager {
                 var dig = applicable[d];
                 float dx = cx - dig.WorldPos.x;
                 float dz = cz - dig.WorldPos.z;
-                if (dx * dx + dz * dz < footprintSq) {
-                    insideDig = true;
-                    break;
-                }
+                if (dx * dx + dz * dz >= footprintSq) continue;
+                if (dig.Mode != DigMode.Surface && !GroundOpenedUnder(chunk, heights, chunkOrigin, cx, cz)) continue;
+                insideDig = true;
+                break;
             }
 
             if (insideDig) {
@@ -82,4 +86,8 @@ public partial class TerraformManager {
 
         DebugLog($"[water-punch] hm={data.Heightmap.name} digs={applicable.Count} dropped={dropped} kept={kept}");
     }
+
+    private static bool GroundOpenedUnder(ChunkRenderData chunk, List<float> heights, Vector3 chunkOrigin, float x, float z) =>
+        chunk?.Chunk != null
+        && CellGroundRemovedByVoxel(chunk, heights, chunkOrigin, Mathf.FloorToInt(x), Mathf.FloorToInt(z));
 }

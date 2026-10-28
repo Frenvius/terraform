@@ -70,8 +70,9 @@ public partial class TerraformManager {
                 int refMinZ = Mathf.FloorToInt(worldPos.z - refineRadius);
                 int refMaxZ = Mathf.FloorToInt(worldPos.z + refineRadius);
                 int refined = RefinePunchFromVoxel(data, refMinX, refMaxX, refMinZ, refMaxZ);
+                int painted = mode == DigMode.Surface ? 0 : PaintCellsOpenedByVoxel(data, refMinX, refMaxX, refMinZ, refMaxZ);
+                if (refined > 0 || painted > 0) data.Heightmap.Poke();
                 if (refined > 0) {
-                    data.Heightmap.Poke();
                     if (ClutterSystem.instance != null) {
                         float grassRadius = refineRadius * Mathf.Sqrt(2f) + 0.5f;
                         ClutterSystem.instance.ResetGrass(worldPos, grassRadius);
@@ -371,6 +372,10 @@ public partial class TerraformManager {
         int worldVzMin = Mathf.FloorToInt(worldPos.z - radius) - 1;
         int worldVzMax = Mathf.CeilToInt (worldPos.z + radius) + 1;
 
+        var query = new ColumnSurfaceQuery {
+            YFloor = yFloor, OriginY = chunkOriginY, TargetY = targetY, FacesDown = facesDown,
+            Reach = falloff == SurfaceFalloff.SmoothCircle ? radius : LevelMaxStep,
+        };
         int writes = 0, columnsTouched = 0, columnsNoSurface = 0;
 
         for (int worldVz = worldVzMin; worldVz <= worldVzMax; worldVz++)
@@ -382,29 +387,9 @@ public partial class TerraformManager {
             float weight = SurfaceMoveWeight(falloff, worldVx - worldPos.x, worldVz - worldPos.z, radius);
             if (weight <= 0f) continue;
 
-            int bestY = -1;
-            float bestFrac = 0f;
-            float bestDist = float.MaxValue;
-            for (int y = VoxelChunk.SIZE - 1; y >= yFloor; y--) {
-                var vHere  = data.Chunk.Get(vx, y, vz);
-                var vAbove = data.Chunk.Get(vx, y + 1, vz);
-                bool crossing = facesDown
-                    ? vHere.Value >= 0f && vAbove.Value < 0f
-                    : vHere.Value < 0f && vAbove.Value >= 0f;
-                if (!crossing) continue;
-                float denom = vHere.Value - vAbove.Value;
-                float frac  = Mathf.Abs(denom) > 1e-6f ? vHere.Value / denom : 0f;
-                float surfaceWorldY = chunkOriginY + y + frac;
-                float d = Mathf.Abs(surfaceWorldY - targetY);
-                if (d < bestDist) {
-                    bestDist = d;
-                    bestY = y;
-                    bestFrac = frac;
-                }
-            }
-            if (bestY < 0) { columnsNoSurface++; continue; }
+            if (!TryFindColumnSurface(data.Chunk, vx, vz, query, out var surface)) { columnsNoSurface++; continue; }
 
-            float surfaceY    = chunkOriginY + bestY + bestFrac;
+            float surfaceY    = surface.WorldY;
             float deltaY      = (targetY - surfaceY) * weight;
             if (deltaY >  maxStep) deltaY =  maxStep;
             if (deltaY < -maxStep) deltaY = -maxStep;
@@ -412,8 +397,8 @@ public partial class TerraformManager {
 
             int bandLoWorld = Mathf.FloorToInt(Mathf.Min(surfaceY, newSurfaceY)) - 2;
             int bandHiWorld = Mathf.CeilToInt (Mathf.Max(surfaceY, newSurfaceY)) + 2;
-            int bandLo = Mathf.Max(yFloor, bandLoWorld - chunkOriginY);
-            int bandHi = Mathf.Min(VoxelChunk.SIZE, bandHiWorld - chunkOriginY);
+            int bandLo = Mathf.Max(surface.WriteLo, bandLoWorld - chunkOriginY);
+            int bandHi = Mathf.Min(surface.WriteHi, bandHiWorld - chunkOriginY);
 
             columnsTouched++;
 
@@ -441,6 +426,62 @@ public partial class TerraformManager {
                 $"[carve-{falloff}] hm={hmName} pos=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) r={radius:F2} " +
                 $"target={targetY:F2} chunkOrigin=({chunkOriginX},{chunkOriginY},{chunkOriginZ}) " +
                 $"cols={columnsTouched} noSurface={columnsNoSurface} writes={writes}");
+        }
+    }
+
+    private struct ColumnSurfaceQuery {
+        public int YFloor;
+        public int OriginY;
+        public float TargetY;
+        public float Reach;
+        public bool FacesDown;
+    }
+
+    private struct ColumnSurface {
+        public float WorldY;
+        public int WriteLo;
+        public int WriteHi;
+    }
+
+    private static bool TryFindColumnSurface(VoxelChunk chunk, int vx, int vz, ColumnSurfaceQuery query, out ColumnSurface best) {
+        best = default;
+        float bestDist = float.MaxValue;
+        for (int y = VoxelChunk.SIZE - 1; y >= query.YFloor; y--) {
+            float here  = chunk.Get(vx, y, vz).Value;
+            float above = chunk.Get(vx, y + 1, vz).Value;
+            bool crossing = query.FacesDown
+                ? here >= 0f && above < 0f
+                : here < 0f && above >= 0f;
+            if (!crossing) continue;
+
+            float denom = here - above;
+            float frac  = Mathf.Abs(denom) > 1e-6f ? here / denom : 0f;
+            float surfaceY = query.OriginY + y + frac;
+            float dist = Mathf.Abs(surfaceY - query.TargetY);
+            if (dist > query.Reach || dist >= bestDist) continue;
+
+            int runLo = SameSideRunEnd(chunk, vx, vz, y, -1, query.YFloor);
+            int runHi = SameSideRunEnd(chunk, vx, vz, y + 1, 1, query.YFloor);
+            if (query.TargetY < query.OriginY + runLo || query.TargetY > query.OriginY + runHi) continue;
+
+            bestDist = dist;
+            best = new ColumnSurface {
+                WorldY  = surfaceY,
+                WriteLo = runLo > query.YFloor ? Mathf.Min(y, runLo + 1) : runLo,
+                WriteHi = runHi < VoxelChunk.SIZE ? Mathf.Max(y + 1, runHi - 1) : runHi,
+            };
+        }
+        return bestDist < float.MaxValue;
+    }
+
+    private static int SameSideRunEnd(VoxelChunk chunk, int vx, int vz, int startY, int step, int yFloor) {
+        bool solid = chunk.Get(vx, startY, vz).Value < 0f;
+        int y = startY;
+        while (true) {
+            int next = y + step;
+            if (next < yFloor || next > VoxelChunk.SIZE) return y;
+            if (chunk.Get(vx, next, vz).Value < 0f != solid) return y;
+            y = next;
         }
     }
 

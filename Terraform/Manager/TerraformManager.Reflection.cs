@@ -37,6 +37,9 @@ public partial class TerraformManager {
         PaintClearedArgs[1] = Vector3.zero;
         PaintClearedArgs[2] = DirtPaintSettings;
         _tcPaintClearedMethod.Invoke(tc, PaintClearedArgs);
+    }
+
+    private static void SaveTerrainComp(TerrainComp tc) {
         _saveMethod?.Invoke(tc, SaveArgs);
     }
 

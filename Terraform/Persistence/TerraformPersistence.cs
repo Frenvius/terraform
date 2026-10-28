@@ -12,11 +12,13 @@ public class ChunkPersistence {
     public float TerrainHeight;
     public byte[] VoxelData;
     public bool VoxelDataIsFull;
+    public Dictionary<int, byte> UndergroundPaved;
 }
 
 public static class TerraformPersistence {
     private const int Magic   = 0x4D465254;
-    private const int Version = 7;
+    private const int Version = 9;
+    private const int FlatUndergroundPaintVersion = 8;
     private const int FirstCompressedVersion = 5;
 
     private static bool s_newerVersionOnDisk;
@@ -117,6 +119,18 @@ public static class TerraformPersistence {
                 }
             }
 
+            if (version == FlatUndergroundPaintVersion) {
+                int flatLen = reader.ReadInt32();
+                if (reader.ReadBytes(flatLen).Length != flatLen) throw new EndOfStreamException();
+            } else if (version > FlatUndergroundPaintVersion) {
+                int pavedCount = reader.ReadInt32();
+                if (pavedCount > 0) {
+                    entry.UndergroundPaved = new Dictionary<int, byte>(pavedCount);
+                    for (int p = 0; p < pavedCount; p++)
+                        entry.UndergroundPaved[reader.ReadInt32()] = reader.ReadByte();
+                }
+            }
+
             result[chunkKey] = entry;
         }
 
@@ -195,6 +209,15 @@ public static class TerraformPersistence {
                 totalSdf++;
             } else {
                 writer.Write(0);
+            }
+
+            var paved = entry.UndergroundPaved;
+            writer.Write(paved?.Count ?? 0);
+            if (paved != null) {
+                foreach (var point in paved) {
+                    writer.Write(point.Key);
+                    writer.Write(point.Value);
+                }
             }
         }
     }

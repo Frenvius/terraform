@@ -100,10 +100,31 @@ public partial class TerraformManager {
         return false;
     }
 
-    private void PunchHoles(Heightmap _hitHm, Vector3 worldPos, float outerRadius, float paintRadius, float maxCeilingDelta,
-                            bool affectsCollision = true, bool doPaint = true) {
-
+    private int PaintCellsOpenedByVoxel(ChunkRenderData data, int wcMinX, int wcMaxX, int wcMinZ, int wcMaxZ) {
+        var hm = data.Heightmap;
+        if (hm == null || hm.gameObject.name.Contains("lodMesh")) return 0;
         EnsureTerrainCompReflection();
+        if (_tcPaintClearedMethod == null) return 0;
+
+        Vector3 origin = data.MeshObject.transform.position;
+        var heights = GetHeightsArray(hm);
+        TerrainComp tc = null;
+        int painted = 0;
+        for (int wcZ = wcMinZ; wcZ <= wcMaxZ; wcZ++)
+        for (int wcX = wcMinX; wcX <= wcMaxX; wcX++) {
+            if (!CellGroundRemovedByVoxel(data, heights, origin, wcX, wcZ)) continue;
+            tc ??= hm.GetAndCreateTerrainCompiler();
+            if (tc == null) return 0;
+            PaintDirtCleared(tc, new Vector3(wcX + 0.5f, 0f, wcZ + 0.5f), OpenedCellPaintRadius);
+            painted++;
+        }
+
+        if (painted > 0) SaveTerrainComp(tc);
+        return painted;
+    }
+
+    private void PunchHoles(Heightmap _hitHm, Vector3 worldPos, float outerRadius, float maxCeilingDelta,
+                            bool affectsCollision = true) {
 
         int totalPunched = 0;
         var allHms = FindObjectsByType<Heightmap>(FindObjectsSortMode.None);
@@ -118,28 +139,17 @@ public partial class TerraformManager {
         foreach (var hm in allHms) {
             float halfSize = hm.m_width * hm.m_scale * 0.5f;
             Vector3 hmPos  = hm.transform.position;
-            bool isSourceChunk =
-                Mathf.Abs(worldPos.x - hmPos.x) < halfSize &&
-                Mathf.Abs(worldPos.z - hmPos.z) < halfSize;
-            float thisPaintRadius = isSourceChunk ? paintRadius : paintRadius + CrossChunkPaintBleed;
-            if (Mathf.Abs(worldPos.x - hmPos.x) > halfSize + thisPaintRadius) continue;
-            if (Mathf.Abs(worldPos.z - hmPos.z) > halfSize + thisPaintRadius) continue;
+            if (Mathf.Abs(worldPos.x - hmPos.x) > halfSize + outerRadius) continue;
+            if (Mathf.Abs(worldPos.z - hmPos.z) > halfSize + outerRadius) continue;
 
             int punchedHere = PunchHolesOnHeightmap(
                 hm, worldPos, maxCeilingDelta,
                 punchedMask, wcMinX_world, wcMinZ_world,
                 wcMaxX_world, wcMaxZ_world, affectsCollision);
 
-            bool hmIsLod = hm.gameObject.name.Contains("lodMesh");
-            bool didSomethingHere = punchedHere > 0;
-            if (doPaint && !hmIsLod && punchedHere > 0) {
-                var tc = hm.GetAndCreateTerrainCompiler();
-                if (tc != null && _tcPaintClearedMethod != null) PaintDirtCleared(tc, worldPos, thisPaintRadius);
-            }
-
-            if (!didSomethingHere) continue;
+            if (punchedHere == 0) continue;
             totalPunched += punchedHere;
-            if (punchedHere > 0 && VerboseLogs) {
+            if (VerboseLogs) {
                 DebugLog($"  punched {punchedHere} cells on hm={hm.gameObject.name} pos={hmPos} scale={hm.m_scale} width={hm.m_width}");
             }
 

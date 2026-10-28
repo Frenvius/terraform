@@ -106,9 +106,8 @@ public partial class TerraformManager {
         if (hm == null) return false;
 
         DeriveModePunchParams(DigMode.Raise, radius, out float punchRadius, out float maxRaiseHeight);
-        float outerRadius = radius * OuterRadiusMultiplier;
 
-        PunchHoles(hm, worldPos, punchRadius, outerRadius, maxRaiseHeight, affectsCollision: false, doPaint: false);
+        PunchHoles(hm, worldPos, punchRadius, maxRaiseHeight, affectsCollision: false);
         Dig(new DigRecord {
             WorldPos = worldPos, Normal = surfaceNormal.normalized, Radius = radius, Mode = DigMode.Raise, Height = height
         });
@@ -148,11 +147,11 @@ public partial class TerraformManager {
         if (mode == DigMode.Surface) {
             float surfaceOuterRadius = radius * OuterRadiusMultiplier;
             float surfacePunchRadius = surfaceOuterRadius + ExtendedPunchBleed;
-            PunchHoles(hm, digPos, surfacePunchRadius, surfaceOuterRadius, SurfacePunchMaxDelta(radius), doPaint: false);
+            PunchHoles(hm, digPos, surfacePunchRadius, SurfacePunchMaxDelta(radius));
         } else {
             float pickaxeOuterRadius = PickaxeRadius + PickaxeNoiseAmplitude;
             float pickaxeReachY      = pickaxeOuterRadius * PickaxeHeightMultiplier;
-            PunchHoles(hm, digPos, pickaxeOuterRadius, pickaxeOuterRadius, pickaxeReachY);
+            PunchHoles(hm, digPos, pickaxeOuterRadius, pickaxeReachY);
         }
         Dig(digPos, radius, mode);
 

@@ -49,7 +49,7 @@ public partial class TerraformManager : MonoBehaviour {
     private const float CeilingNormalMaxY = -0.3f;
 
     private const float ExtendedPunchBleed     = 2f;
-    private const float CrossChunkPaintBleed   = 1.5f;
+    private const float OpenedCellPaintRadius  = 1f;
 
     private const int FloorSentinelLayers = 1;
     private const int GlobalBedrockY     = 0;
@@ -94,8 +94,10 @@ public partial class TerraformManager : MonoBehaviour {
         if (loaded != null) {
             _pendingPersistence = loaded;
             _chunkDigHistory = new Dictionary<long, List<DigRecord>>(loaded.Count);
-            foreach (var kv in loaded)
+            foreach (var kv in loaded) {
                 _chunkDigHistory[kv.Key] = kv.Value.Digs;
+                LoadUndergroundPaint(kv.Key, kv.Value.UndergroundPaved);
+            }
         }
         _persistenceLoaded = true;
     }
@@ -122,6 +124,7 @@ public partial class TerraformManager : MonoBehaviour {
         var snapshot = new Dictionary<long, ChunkPersistence>(_chunkDigHistory.Count);
         foreach (var kv in _chunkDigHistory) {
             var entry = new ChunkPersistence { Digs = new List<DigRecord>(kv.Value) };
+            _undergroundPaved.TryGetValue(kv.Key, out entry.UndergroundPaved);
             snapshot[kv.Key] = entry;
         }
         if (_chunks != null) {
