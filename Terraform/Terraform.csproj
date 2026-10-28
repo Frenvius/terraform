@@ -111,6 +111,7 @@
     <Compile Include="Configs\ModConfiguration.cs" />
     <Compile Include="Patches\ZNetSceneAwakePatch.cs" />
     <Compile Include="Patches\CharacterUnderWorldCheckPatch.cs" />
+    <Compile Include="Patches\FireplaceCavityPatch.cs" />
     <Compile Include="Patches\GameFindSpawnPointPatch.cs" />
     <Compile Include="Patches\ZoneSystemGroundHeightPatch.cs" />
     <Compile Include="Patches\PathfindingSeaLevelPatch.cs" />
