@@ -61,15 +61,15 @@ public partial class TerraformManager {
             DumpChunkLeakState(kv.Key, data, waterY, dist, kv.Key == playerChunkId);
         }
 
-        TerraformPlugin.Log.LogInfo($"[leak-debug] activeLeaks={_waterLeaks.Count}");
-        foreach (var kv in _leakCircleCache) {
-            if (kv.Value == null) continue;
-            foreach (var c in kv.Value) {
-                float dx = c.CenterX - pp.x;
-                float dz = c.CenterZ - pp.z;
-                float distXZ = Mathf.Sqrt(dx * dx + dz * dz);
-                TerraformPlugin.Log.LogInfo($"[leak-debug]   leak chunk={kv.Key} center=({c.CenterX:F1},{c.TopY:F1},{c.CenterZ:F1}) bottomY={c.BottomY:F1} distXZ={distXZ:F1}");
-            }
+        TerraformPlugin.Log.LogInfo($"[leak-debug] openings={_leakOpenings.Count} streamCells={_streamSolver.Cells.Count} falls={_streamSolver.Falls.Count}");
+        foreach (var opening in _leakOpenings) {
+            float dx = opening.x - pp.x;
+            float dz = opening.z - pp.z;
+            float distXZ = Mathf.Sqrt(dx * dx + dz * dz);
+            TerraformPlugin.Log.LogInfo($"[leak-debug]   opening=({opening.x:F1},{opening.y:F1},{opening.z:F1}) distXZ={distXZ:F1}");
+        }
+        foreach (var fall in _streamSolver.Falls) {
+            TerraformPlugin.Log.LogInfo($"[leak-debug]   fall cell=({fall.X},{fall.Z}) topY={fall.TopY:F2} bottomY={fall.BottomY:F2}");
         }
 
         TerraformPlugin.Log.LogInfo("[leak-debug] ===== REPORT END =====");
@@ -110,9 +110,8 @@ public partial class TerraformManager {
             }
         }
 
-        bool hasLeak = _waterLeaks.ContainsKey(chunkId);
         string tag = isPlayerChunk ? "[PLAYER]" : "";
-        TerraformPlugin.Log.LogInfo($"[leak-debug] chunk id={chunkId} {tag} origin=({cx},{cy},{cz}) distXZ={distToPlayer:F1} holes={holeCount} (lake={lakeHoles} land={nonLakeHoles}) digs={pickaxeDigs}px+{surfaceDigs}sf leak={hasLeak}");
+        TerraformPlugin.Log.LogInfo($"[leak-debug] chunk id={chunkId} {tag} origin=({cx},{cy},{cz}) distXZ={distToPlayer:F1} holes={holeCount} (lake={lakeHoles} land={nonLakeHoles}) digs={pickaxeDigs}px+{surfaceDigs}sf");
     }
 
     private void ClearLeakDebugMarkers() {
@@ -146,12 +145,10 @@ public partial class TerraformManager {
             }
         }
 
-        foreach (var kv in _leakCircleCache) {
-            if (kv.Value == null) continue;
-            foreach (var c in kv.Value) {
-                SpawnDebugMarker(c.CenterX, c.TopY, c.CenterZ, 0.8f, matLid);
-                SpawnDebugMarker(c.CenterX, c.BottomY, c.CenterZ, 0.8f, matLid);
-            }
+        foreach (var opening in _leakOpenings) SpawnDebugMarker(opening.x, opening.y, opening.z, 0.8f, matLid);
+        foreach (var fall in _streamSolver.Falls) {
+            var landing = Terraform.Water.WaterStreamSolver.Center(fall.X, fall.Z, fall.BottomY);
+            SpawnDebugMarker(landing.x, landing.y, landing.z, 0.3f, matLid);
         }
     }
 

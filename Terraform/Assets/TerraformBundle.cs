@@ -9,12 +9,12 @@ public static class TerraformBundle {
     private static AssetBundle _bundle;
     private static bool _loadAttempted;
 
-    public static GameObject LoadPrefab(string name) {
+    public static T Load<T>(string name) where T : Object {
         if (!_loadAttempted) TryLoad();
         if (_bundle == null) return null;
-        var prefab = _bundle.LoadAsset<GameObject>(name);
-        if (prefab == null) TerraformPlugin.Log.LogError($"[bundle] prefab '{name}' not found in bundle");
-        return prefab;
+        var asset = _bundle.LoadAsset<T>(name);
+        if (asset == null) TerraformPlugin.Log.LogError($"[bundle] {typeof(T).Name} '{name}' not found in bundle");
+        return asset;
     }
 
     private static void TryLoad() {

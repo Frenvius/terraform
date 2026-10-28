@@ -152,6 +152,11 @@ public sealed class PlacedWater : MonoBehaviour {
         for (int i = Instances.Count - 1; i >= 0; i--) Instances[i].Exchange();
     }
 
+    public static Material UpdateSharedMaterial() {
+        UpdateMaterial();
+        return _material;
+    }
+
     private static void UpdateMaterial() {
         if (_material == null) {
             foreach (var water in WaterVolume.Instances) {

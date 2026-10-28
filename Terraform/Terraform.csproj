@@ -87,6 +87,10 @@
       <HintPath>$(VALHEIM_INSTALL)\valheim_Data\Managed\UnityEngine.AudioModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="UnityEngine.ParticleSystemModule">
+      <HintPath>$(VALHEIM_INSTALL)\valheim_Data\Managed\UnityEngine.ParticleSystemModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="UnityEngine.AIModule">
       <HintPath>$(VALHEIM_INSTALL)\valheim_Data\Managed\UnityEngine.AIModule.dll</HintPath>
       <Private>False</Private>
@@ -123,6 +127,8 @@
     <Compile Include="Patches\WaterBucketPatch.cs" />
     <Compile Include="Water\BucketWaterMath.cs" />
     <Compile Include="Water\PlacedWater.cs" />
+    <Compile Include="Water\WaterStreamSolver.cs" />
+    <Compile Include="Water\WaterStreamMesh.cs" />
     <Compile Include="Patches\Types\ChunkRenderData.cs" />
     <Compile Include="Patches\Types\DigMode.cs" />
     <Compile Include="Patches\Types\DigRecord.cs" />
@@ -147,8 +153,6 @@
     <Compile Include="Manager\TerraformManager.WaterLeakDebug.cs" />
     <Compile Include="Persistence\TerraformPersistence.cs" />
     <Compile Include="Assets\TerraformBundle.cs" />
-    <Compile Include="Assets\WaterfallAssets.cs" />
-    <Compile Include="Assets\UVScroller.cs" />
     <EmbeddedResource Include="Resources\terraform" Condition="Exists('Resources\terraform')">
       <LogicalName>Terraform.Resources.terraform</LogicalName>
     </EmbeddedResource>

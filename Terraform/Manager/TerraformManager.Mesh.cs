@@ -6,6 +6,7 @@ namespace Terraform.Patches;
 
 public partial class TerraformManager {
     private void RebuildMesh(ChunkRenderData data) {
+        _waterStreamsDirty = true;
         if (data.Chunk == null) {
             data.Mesh.Clear();
             SetChunkVisible(data, false);

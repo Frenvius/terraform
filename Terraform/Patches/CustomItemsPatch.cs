@@ -18,7 +18,7 @@ public static class CustomItems {
             if (_prefabs != null) return _prefabs;
             _prefabs = new List<GameObject>();
             foreach (var name in ItemPrefabNames) {
-                var prefab = TerraformBundle.LoadPrefab(name);
+                var prefab = TerraformBundle.Load<GameObject>(name);
                 if (prefab == null) continue;
                 WaterBucket.Configure(prefab);
                 _prefabs.Add(prefab);

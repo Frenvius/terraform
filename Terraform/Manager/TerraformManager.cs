@@ -218,6 +218,7 @@ public partial class TerraformManager : MonoBehaviour {
             ScanHeightmaps();
         }
         FlushNavDirty();
+        UpdateWaterStreams();
         UpdateUndergroundCollision();
         HandleInput();
     }
