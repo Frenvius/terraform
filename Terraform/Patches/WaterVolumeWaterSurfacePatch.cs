@@ -14,4 +14,11 @@ public static class WaterVolume_GetWaterSurface_Patch {
         __result = NoWaterSentinel;
         return false;
     }
+
+    static void Postfix(WaterVolume __instance, Vector3 point, ref float __result) {
+        if (__result <= NoWaterSentinel) return;
+        var manager = TerraformManager.Instance;
+        if (manager == null) return;
+        __result -= manager.WaterSinkAt(__instance, point);
+    }
 }

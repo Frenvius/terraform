@@ -85,7 +85,7 @@ public partial class TerraformManager {
             RebuildMesh(data);
             if (swMesh != null) meshTicks += swMesh.ElapsedTicks;
 
-            if (_waters.TryGetValue(kv.Key, out var water)) RebuildWaterMeshFromHistory(water);
+            if (_waters.TryGetValue(kv.Key, out var water)) RebuildWaterMeshFromHoles(water);
 
             if (VerboseLogs) DebugLog(
                 $"Dig world=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) " +

@@ -52,7 +52,7 @@ public partial class TerraformManager {
 
             DebugLog($"WaterRenderData -> {wv.gameObject.name} verts={cloned.vertexCount} tris={cloned.triangles.Length / 3}");
 
-            RebuildWaterMeshFromHistory(data);
+            RebuildWaterMeshFromHoles(data);
         }
     }
 }

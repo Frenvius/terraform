@@ -9,4 +9,5 @@ public class WaterRenderData {
     public Mesh OriginalSharedMesh;
     public Mesh ClonedMesh;
     public long ChunkKey;
+    public TerraformManager.OpenCellField? SinkField;
 }

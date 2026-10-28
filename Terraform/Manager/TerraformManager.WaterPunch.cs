@@ -4,90 +4,348 @@ using UnityEngine;
 namespace Terraform.Patches;
 
 public partial class TerraformManager {
-    private const float WaterDigReachMargin = 0.5f;
+    private const float WaterSinkDepth = 4f;
+    private const float WaterSinkRadius = 6f;
 
-    private void RebuildWaterMeshFromHistory(WaterRenderData data) {
+    public float WaterSinkAt(WaterVolume volume, Vector3 point) {
+        if (volume.m_heightmap == null) return 0f;
+        if (!_waters.TryGetValue(volume.m_heightmap.GetInstanceID(), out var data)) return 0f;
+        return ComputeWaterSink(data, point);
+    }
+
+    private static float ComputeWaterSink(WaterRenderData data, Vector3 world) {
+        if (data.SinkField is not { } field) return 0f;
+        float falloff = WaterSinkFalloff(field.DistanceTo(world.x, world.z, WaterSinkRadius));
+        if (falloff <= 0f) return 0f;
+        float waterY = data.SurfaceFilter.transform.position.y;
+        float terrainY = SampleHeightmapMeshYCached(data.Heightmap, GetHeightsArray(data.Heightmap), world, waterY);
+        return falloff * WaterSinkDepth * Mathf.Clamp01(terrainY - waterY);
+    }
+
+    private static float WaterSinkFalloff(float distance) =>
+        distance >= WaterSinkRadius ? 0f : 1f - Mathf.SmoothStep(0f, 1f, distance / WaterSinkRadius);
+
+    private void RebuildWaterMeshFromHoles(WaterRenderData data) {
         if (data == null) return;
         var original = data.OriginalSharedMesh;
         var cloned = data.ClonedMesh;
         var filter = data.SurfaceFilter;
-        if (original == null || cloned == null || filter == null) return;
+        var hm = data.Heightmap;
+        if (original == null || cloned == null || filter == null || hm == null) return;
 
+        var cutter = new WaterSurfaceCutter(original, filter.transform);
         var originalIndices = original.GetIndices(0);
 
-        if (!_chunkDigHistory.TryGetValue(data.ChunkKey, out var digs) || digs.Count == 0) {
-            cloned.SetIndices(originalIndices, MeshTopology.Triangles, 0);
+        float scale = hm.m_scale;
+        float halfSize = hm.m_width * scale * 0.5f;
+        Vector3 hmPos = hm.transform.position;
+        float cellOriginX = hmPos.x - halfSize;
+        float cellOriginZ = hmPos.z - halfSize;
+        float invScale = 1f / scale;
+
+        var holes = CollectWaterOpenCells(data, new Vector3(cellOriginX, filter.transform.position.y, cellOriginZ));
+        data.SinkField = null;
+        if (holes.Count == 0) {
+            for (int i = 0; i + 2 < originalIndices.Length; i += 3)
+                cutter.Keep(originalIndices[i], originalIndices[i + 1], originalIndices[i + 2]);
+            cutter.ApplyTo(cloned, original.bounds);
             return;
         }
 
-        Transform waterT = filter.transform;
-        float waterY = waterT.position.y;
-
-        List<DigRecord> applicable = null;
-        float pickaxeReach  = PickaxeRadius + PickaxeNoiseAmplitude;
-        float pickaxeReachY = pickaxeReach * PickaxeHeightMultiplier;
-        foreach (var dig in digs) {
-            float surfaceBowlDepth = dig.Radius * (BowlDepthMultiplier + ShelfDepthMultiplier);
-            float reachY = dig.Mode == DigMode.Surface ? surfaceBowlDepth + WaterDigReachMargin
-                                                       : pickaxeReachY + WaterDigReachMargin;
-            if (dig.WorldPos.y - waterY > reachY) continue;
-            if (waterY - dig.WorldPos.y > reachY) continue;
-            (applicable ??= new List<DigRecord>()).Add(dig);
-        }
-
-        if (applicable == null) {
-            cloned.SetIndices(originalIndices, MeshTopology.Triangles, 0);
-            return;
-        }
-
-        _chunks.TryGetValue(data.Heightmap.GetInstanceID(), out var chunk);
-        var heights = chunk != null ? GetHeightsArray(chunk.Heightmap) : null;
-        Vector3 chunkOrigin = chunk != null ? chunk.MeshObject.transform.position : Vector3.zero;
-
-        var localVerts = original.vertices;
-        var filtered = new List<int>(originalIndices.Length);
-        int dropped = 0, kept = 0;
+        int clipped = 0;
 
         for (int i = 0; i + 2 < originalIndices.Length; i += 3) {
             int ia = originalIndices[i];
             int ib = originalIndices[i + 1];
             int ic = originalIndices[i + 2];
 
-            Vector3 wa = waterT.TransformPoint(localVerts[ia]);
-            Vector3 wb = waterT.TransformPoint(localVerts[ib]);
-            Vector3 wc = waterT.TransformPoint(localVerts[ic]);
+            Vector3 wa = cutter.WorldVertex(ia);
+            Vector3 wb = cutter.WorldVertex(ib);
+            Vector3 wc = cutter.WorldVertex(ic);
 
-            float cx = (wa.x + wb.x + wc.x) * (1f / 3f);
-            float cz = (wa.z + wb.z + wc.z) * (1f / 3f);
+            int minX = Mathf.FloorToInt((Mathf.Min(wa.x, wb.x, wc.x) - cellOriginX) * invScale);
+            int maxX = Mathf.FloorToInt((Mathf.Max(wa.x, wb.x, wc.x) - cellOriginX) * invScale);
+            int minZ = Mathf.FloorToInt((Mathf.Min(wa.z, wb.z, wc.z) - cellOriginZ) * invScale);
+            int maxZ = Mathf.FloorToInt((Mathf.Max(wa.z, wb.z, wc.z) - cellOriginZ) * invScale);
 
-            bool insideDig = false;
-            float footprintSq = pickaxeReach * pickaxeReach;
-            for (int d = 0; d < applicable.Count; d++) {
-                var dig = applicable[d];
-                float dx = cx - dig.WorldPos.x;
-                float dz = cz - dig.WorldPos.z;
-                if (dx * dx + dz * dz >= footprintSq) continue;
-                if (dig.Mode != DigMode.Surface && !GroundOpenedUnder(chunk, heights, chunkOrigin, cx, cz)) continue;
-                insideDig = true;
-                break;
+            if (!AnyHoleInCellRange(holes, minX, maxX, minZ, maxZ)) {
+                cutter.Keep(ia, ib, ic);
+                continue;
             }
 
-            if (insideDig) {
-                dropped++;
-            } else {
-                filtered.Add(ia);
-                filtered.Add(ib);
-                filtered.Add(ic);
-                kept++;
+            clipped++;
+            cutter.BeginTriangle(ia, ib, ic);
+            for (int z = minZ; z <= maxZ; z++)
+            for (int x = minX; x <= maxX; x++) {
+                if (holes.Contains((x, z))) continue;
+                float x0 = cellOriginX + x * scale;
+                float z0 = cellOriginZ + z * scale;
+                cutter.AddPieceInside(x0, z0, x0 + scale, z0 + scale);
             }
         }
 
-        cloned.SetIndices(filtered.ToArray(), MeshTopology.Triangles, 0);
+        var field = new OpenCellField(holes, cellOriginX, cellOriginZ, scale);
+        data.SinkField = field;
+        int sunk = cutter.SinkVertices(world => ComputeWaterSink(data, world));
+        var bounds = original.bounds;
+        bounds.Encapsulate(bounds.min - Vector3.up * cutter.LocalSinkDepth);
+        cutter.ApplyTo(cloned, bounds);
 
-        DebugLog($"[water-punch] hm={data.Heightmap.name} digs={applicable.Count} dropped={dropped} kept={kept}");
+        DebugLog($"[water-punch] hm={hm.name} holes={holes.Count} clipped={clipped} sunk={sunk} tris={cutter.TriangleCount}");
     }
 
-    private static bool GroundOpenedUnder(ChunkRenderData chunk, List<float> heights, Vector3 chunkOrigin, float x, float z) =>
-        chunk?.Chunk != null
-        && CellGroundRemovedByVoxel(chunk, heights, chunkOrigin, Mathf.FloorToInt(x), Mathf.FloorToInt(z));
+    public readonly struct OpenCellField {
+        private readonly HashSet<(int x, int y)> _cells;
+        private readonly float _originX;
+        private readonly float _originZ;
+        private readonly float _scale;
+        private readonly int _minX, _maxX, _minZ, _maxZ;
+
+        public OpenCellField(HashSet<(int x, int y)> cells, float originX, float originZ, float scale) {
+            _cells = cells;
+            _originX = originX;
+            _originZ = originZ;
+            _scale = scale;
+            _minX = _minZ = int.MaxValue;
+            _maxX = _maxZ = int.MinValue;
+            foreach (var c in cells) {
+                if (c.x < _minX) _minX = c.x;
+                if (c.x > _maxX) _maxX = c.x;
+                if (c.y < _minZ) _minZ = c.y;
+                if (c.y > _maxZ) _maxZ = c.y;
+            }
+        }
+
+        public float DistanceTo(float worldX, float worldZ, float maxDistance) {
+            int reach = Mathf.CeilToInt(maxDistance / _scale);
+            int cx = Mathf.FloorToInt((worldX - _originX) / _scale);
+            int cz = Mathf.FloorToInt((worldZ - _originZ) / _scale);
+            int x0 = Mathf.Max(cx - reach, _minX), x1 = Mathf.Min(cx + reach, _maxX);
+            int z0 = Mathf.Max(cz - reach, _minZ), z1 = Mathf.Min(cz + reach, _maxZ);
+
+            float bestSq = maxDistance * maxDistance;
+            for (int z = z0; z <= z1; z++)
+            for (int x = x0; x <= x1; x++) {
+                if (!_cells.Contains((x, z))) continue;
+                float minX = _originX + x * _scale;
+                float minZ = _originZ + z * _scale;
+                float dx = Mathf.Max(minX - worldX, 0f, worldX - (minX + _scale));
+                float dz = Mathf.Max(minZ - worldZ, 0f, worldZ - (minZ + _scale));
+                float dSq = dx * dx + dz * dz;
+                if (dSq < bestSq) bestSq = dSq;
+            }
+            return Mathf.Sqrt(bestSq);
+        }
+    }
+
+    private HashSet<(int x, int y)> CollectWaterOpenCells(WaterRenderData data, Vector3 cellOrigin) {
+        var open = new HashSet<(int x, int y)>();
+        var hm = data.Heightmap;
+        if (!HolePunchSystem.TryGetCollisionHoles(hm, out var holes) || holes.Count == 0) return open;
+
+        _chunks.TryGetValue(hm.GetInstanceID(), out var chunk);
+        var heights = GetHeightsArray(hm);
+        float scale = hm.m_scale;
+        float waterY = cellOrigin.y;
+        Vector3 localOrigin = chunk?.Chunk != null ? cellOrigin - chunk.MeshObject.transform.position : Vector3.zero;
+
+        foreach (var cell in holes) {
+            var center = new Vector3(cellOrigin.x + (cell.x + 0.5f) * scale, 0f, cellOrigin.z + (cell.y + 0.5f) * scale);
+            if (SampleHeightmapMeshYCached(hm, heights, center, waterY) <= waterY) continue;
+            if (chunk?.Chunk != null) {
+                var cellMin = new Vector3(localOrigin.x + cell.x * scale, localOrigin.y, localOrigin.z + cell.y * scale);
+                if (!WaterPlaneOpenInCell(chunk.Chunk, cellMin, scale)) continue;
+            }
+            open.Add(cell);
+        }
+        return open;
+    }
+
+    private static bool WaterPlaneOpenInCell(Terraform.Voxel.Core.VoxelChunk chunk, Vector3 localCellMin, float size) {
+        if (localCellMin.y < 0f || localCellMin.y > Terraform.Voxel.Core.VoxelChunk.SIZE) return false;
+        float half = size * 0.5f;
+        return IsVoxelAirAt(chunk, localCellMin.x + half, localCellMin.y, localCellMin.z + half)
+            || IsVoxelAirAt(chunk, localCellMin.x,        localCellMin.y, localCellMin.z)
+            || IsVoxelAirAt(chunk, localCellMin.x + size, localCellMin.y, localCellMin.z)
+            || IsVoxelAirAt(chunk, localCellMin.x,        localCellMin.y, localCellMin.z + size)
+            || IsVoxelAirAt(chunk, localCellMin.x + size, localCellMin.y, localCellMin.z + size);
+    }
+
+    private static bool IsVoxelAirAt(Terraform.Voxel.Core.VoxelChunk chunk, float x, float y, float z) {
+        int size = Terraform.Voxel.Core.VoxelChunk.SIZE;
+        if (x < 0f || x > size || z < 0f || z > size) return false;
+        return SampleSdfTri(chunk, x, y, z) > 0f;
+    }
+
+    private static bool AnyHoleInCellRange(HashSet<(int x, int y)> holes, int minX, int maxX, int minZ, int maxZ) {
+        for (int z = minZ; z <= maxZ; z++)
+        for (int x = minX; x <= maxX; x++) {
+            if (holes.Contains((x, z))) return true;
+        }
+        return false;
+    }
+
+    private sealed class WaterSurfaceCutter {
+        private const float MinPieceArea = 1e-4f;
+
+        private readonly Transform _waterT;
+
+        private readonly Vector3[] _srcVerts;
+        private readonly Vector3[] _srcNormals;
+        private readonly Vector4[] _srcTangents;
+        private readonly Vector2[] _srcUv;
+        private readonly Vector2[] _srcUv2;
+        private readonly Color[] _srcColors;
+        private readonly Vector3[] _worldVerts;
+
+        private readonly List<Vector3> _verts;
+        private readonly List<Vector3> _normals;
+        private readonly List<Vector4> _tangents;
+        private readonly List<Vector2> _uv;
+        private readonly List<Vector2> _uv2;
+        private readonly List<Color> _colors;
+        private readonly List<int> _indices = new();
+
+        private readonly List<Vector3> _poly = new(8);
+        private readonly List<Vector3> _scratch = new(8);
+        private int _ia, _ib, _ic;
+
+        public int TriangleCount => _indices.Count / 3;
+
+        public float LocalSinkDepth => WaterSinkDepth / Mathf.Max(_waterT.lossyScale.y, 1e-4f);
+
+        public WaterSurfaceCutter(Mesh original, Transform waterT) {
+            _waterT      = waterT;
+            _srcVerts    = original.vertices;
+            _srcNormals  = original.normals;
+            _srcTangents = original.tangents;
+            _srcUv       = original.uv;
+            _srcUv2      = original.uv2;
+            _srcColors   = original.colors;
+
+            _worldVerts = new Vector3[_srcVerts.Length];
+            for (int i = 0; i < _srcVerts.Length; i++)
+                _worldVerts[i] = waterT.TransformPoint(_srcVerts[i]);
+
+            _verts    = new List<Vector3>(_srcVerts);
+            _normals  = new List<Vector3>(_srcNormals);
+            _tangents = new List<Vector4>(_srcTangents);
+            _uv       = new List<Vector2>(_srcUv);
+            _uv2      = new List<Vector2>(_srcUv2);
+            _colors   = new List<Color>(_srcColors);
+        }
+
+        public Vector3 WorldVertex(int index) => _worldVerts[index];
+
+        public void Keep(int ia, int ib, int ic) {
+            _indices.Add(ia);
+            _indices.Add(ib);
+            _indices.Add(ic);
+        }
+
+        public void BeginTriangle(int ia, int ib, int ic) {
+            _ia = ia;
+            _ib = ib;
+            _ic = ic;
+        }
+
+        public void AddPieceInside(float minX, float minZ, float maxX, float maxZ) {
+            _poly.Clear();
+            _poly.Add(new Vector3(1f, 0f, 0f));
+            _poly.Add(new Vector3(0f, 1f, 0f));
+            _poly.Add(new Vector3(0f, 0f, 1f));
+
+            ClipAxis(0, minX, 1f);
+            ClipAxis(0, maxX, -1f);
+            ClipAxis(2, minZ, 1f);
+            ClipAxis(2, maxZ, -1f);
+            if (_poly.Count < 3 || PolygonArea() < MinPieceArea) return;
+
+            int first = AddInterpolated(_poly[0]);
+            int prev = AddInterpolated(_poly[1]);
+            for (int i = 2; i < _poly.Count; i++) {
+                int next = AddInterpolated(_poly[i]);
+                Keep(first, prev, next);
+                prev = next;
+            }
+        }
+
+        public int SinkVertices(System.Func<Vector3, float> worldSinkAt) {
+            float invScaleY = 1f / Mathf.Max(_waterT.lossyScale.y, 1e-4f);
+            int sunk = 0;
+            for (int i = 0; i < _verts.Count; i++) {
+                float sink = worldSinkAt(_waterT.TransformPoint(_verts[i]));
+                if (sink <= 0f) continue;
+                Vector3 v = _verts[i];
+                v.y -= sink * invScaleY;
+                _verts[i] = v;
+                sunk++;
+            }
+            return sunk;
+        }
+
+        public void ApplyTo(Mesh mesh, Bounds bounds) {
+            mesh.Clear();
+            mesh.indexFormat = _verts.Count > 65535
+                ? UnityEngine.Rendering.IndexFormat.UInt32
+                : UnityEngine.Rendering.IndexFormat.UInt16;
+            mesh.SetVertices(_verts);
+            if (_normals.Count  == _verts.Count) mesh.SetNormals(_normals);
+            if (_tangents.Count == _verts.Count) mesh.SetTangents(_tangents);
+            if (_uv.Count       == _verts.Count) mesh.SetUVs(0, _uv);
+            if (_uv2.Count      == _verts.Count) mesh.SetUVs(1, _uv2);
+            if (_colors.Count   == _verts.Count) mesh.SetColors(_colors);
+            mesh.SetIndices(_indices, MeshTopology.Triangles, 0);
+            mesh.bounds = bounds;
+        }
+
+        private void ClipAxis(int axis, float bound, float keepSign) {
+            _scratch.Clear();
+            int count = _poly.Count;
+            for (int i = 0; i < count; i++) {
+                Vector3 cur = _poly[i];
+                Vector3 nxt = _poly[(i + 1) % count];
+                float dCur = keepSign * (WorldCoord(cur, axis) - bound);
+                float dNxt = keepSign * (WorldCoord(nxt, axis) - bound);
+                if (dCur >= 0f) _scratch.Add(cur);
+                if ((dCur >= 0f) != (dNxt >= 0f))
+                    _scratch.Add(Vector3.Lerp(cur, nxt, dCur / (dCur - dNxt)));
+            }
+            _poly.Clear();
+            _poly.AddRange(_scratch);
+        }
+
+        private float WorldCoord(Vector3 bary, int axis) =>
+            _worldVerts[_ia][axis] * bary.x + _worldVerts[_ib][axis] * bary.y + _worldVerts[_ic][axis] * bary.z;
+
+        private float PolygonArea() {
+            float twiceArea = 0f;
+            for (int i = 0; i < _poly.Count; i++) {
+                Vector3 p = _poly[i];
+                Vector3 q = _poly[(i + 1) % _poly.Count];
+                twiceArea += WorldCoord(p, 0) * WorldCoord(q, 2) - WorldCoord(q, 0) * WorldCoord(p, 2);
+            }
+            return Mathf.Abs(twiceArea) * 0.5f;
+        }
+
+        private int AddInterpolated(Vector3 bary) {
+            _verts.Add(Blend(_srcVerts[_ia], _srcVerts[_ib], _srcVerts[_ic], bary));
+            if (_srcNormals.Length > 0)
+                _normals.Add(Blend(_srcNormals[_ia], _srcNormals[_ib], _srcNormals[_ic], bary).normalized);
+            if (_srcTangents.Length > 0) {
+                Vector4 t = _srcTangents[_ia] * bary.x + _srcTangents[_ib] * bary.y + _srcTangents[_ic] * bary.z;
+                _tangents.Add(new Vector4(t.x, t.y, t.z, _srcTangents[_ia].w));
+            }
+            if (_srcUv.Length > 0)
+                _uv.Add(_srcUv[_ia] * bary.x + _srcUv[_ib] * bary.y + _srcUv[_ic] * bary.z);
+            if (_srcUv2.Length > 0)
+                _uv2.Add(_srcUv2[_ia] * bary.x + _srcUv2[_ib] * bary.y + _srcUv2[_ic] * bary.z);
+            if (_srcColors.Length > 0)
+                _colors.Add(_srcColors[_ia] * bary.x + _srcColors[_ib] * bary.y + _srcColors[_ic] * bary.z);
+            return _verts.Count - 1;
+        }
+
+        private static Vector3 Blend(Vector3 a, Vector3 b, Vector3 c, Vector3 bary) =>
+            a * bary.x + b * bary.y + c * bary.z;
+    }
 }

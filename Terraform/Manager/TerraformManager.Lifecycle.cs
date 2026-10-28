@@ -151,8 +151,10 @@ public partial class TerraformManager {
 
         ResetGrassForAllHistoricalDigs();
 
-        foreach (var data in built)
+        foreach (var data in built) {
             RebuildChunkFromHistory(data);
+            if (_waters.TryGetValue(data.Heightmap.GetInstanceID(), out var water)) RebuildWaterMeshFromHoles(water);
+        }
 
         foreach (var data in built) {
             if (data?.Heightmap == null) continue;
