@@ -9,23 +9,14 @@ public partial class TerraformManager {
     private const int PaintBandHeight = 2;
     private const int PaintBandCount = VoxelChunk.SIZE / PaintBandHeight;
     private const float UndergroundPaintVerticalReach = 1.5f;
-    private const float UndergroundCeilingMargin = 0.5f;
-    private const float OpenColumnScanStep = 0.5f;
+    private const float UndergroundAirProbe = 0.5f;
     private const byte UndergroundMaskAlpha = 255;
 
     private readonly Dictionary<long, Dictionary<int, byte>> _undergroundPaved = new();
-    private readonly Color32[] _paintBandPixels = new Color32[PaintLatticeSize * PaintLatticeSize];
-    private static Texture2D _undergroundDirtMask;
+    private const byte UndergroundDirt = 255;
 
-    private static Texture2D UndergroundDirtMask {
-        get {
-            if (_undergroundDirtMask != null) return _undergroundDirtMask;
-            _undergroundDirtMask = new Texture2D(1, 1) { name = "TerraformUndergroundDirt", wrapMode = TextureWrapMode.Clamp };
-            _undergroundDirtMask.SetPixels32(new[] { new Color32(255, 0, 0, UndergroundMaskAlpha) });
-            _undergroundDirtMask.Apply();
-            return _undergroundDirtMask;
-        }
-    }
+    private readonly Color32[] _maskPixels = new Color32[PaintLatticeSize * PaintLatticeSize];
+    private readonly Color32[] _undergroundBasePixels = new Color32[PaintLatticeSize * PaintLatticeSize];
 
     private static long ChunkKeyOf(ChunkRenderData data) {
         Vector3 origin = data.MeshObject.transform.position;
@@ -45,7 +36,7 @@ public partial class TerraformManager {
             if (data?.MeshObject == null) continue;
             if (!PaintUndergroundChunk(data, worldPos, radius, target)) continue;
             if (PaintedBandsChanged(data)) RebuildMesh(data);
-            else RefreshPaintBandMasks(data);
+            else RefreshUndergroundMasks(data);
         }
     }
 
@@ -109,9 +100,67 @@ public partial class TerraformManager {
         return false;
     }
 
-    private void RefreshPaintBandMasks(ChunkRenderData data) {
+    private void RefreshUndergroundMasks(ChunkRenderData data) {
+        BuildUndergroundBasePixels(data);
+        WriteMask(data.UndergroundMask ??= NewUndergroundMask("TerraformUndergroundDirt"), _undergroundBasePixels);
         _undergroundPaved.TryGetValue(ChunkKeyOf(data), out var paved);
         foreach (var band in data.PaintBandMasks) WritePaintBandMask(band.Value, paved, band.Key);
+    }
+
+    private void BuildUndergroundBasePixels(ChunkRenderData data) {
+        EnsureHeightmapReflection();
+        var surface = _paintMaskField?.GetValue(data.Heightmap) as Texture2D;
+        bool matchesLattice = surface != null && surface.width == PaintLatticeSize && surface.height == PaintLatticeSize;
+        var source = matchesLattice ? surface.GetPixels32() : null;
+        for (int i = 0; i < _undergroundBasePixels.Length; i++) {
+            _undergroundBasePixels[i] = source != null && data.SurfaceSeamTexels[i]
+                ? new Color32(source[i].r, 0, source[i].b, UndergroundMaskAlpha)
+                : new Color32(UndergroundDirt, 0, 0, UndergroundMaskAlpha);
+        }
+    }
+
+    private static void MarkSurfaceSeamTexels(
+        ChunkRenderData data, Vector3[] verts, List<bool> onTerrainSurface, SubmeshSorter submeshes) {
+        var usedBySurface = new bool[verts.Length];
+        foreach (int i in submeshes.Surface) usedBySurface[i] = true;
+
+        var seam = data.SurfaceSeamTexels;
+        System.Array.Clear(seam, 0, seam.Length);
+        foreach (var indices in submeshes.UndergroundLists()) {
+            foreach (int i in indices) {
+                if (usedBySurface[i] || onTerrainSurface[i]) MarkTexelsAround(seam, verts[i]);
+            }
+        }
+    }
+
+    private static void MarkTexelsAround(bool[] texels, Vector3 local) {
+        int minX = Mathf.Max(0, Mathf.FloorToInt(local.x) - 1);
+        int maxX = Mathf.Min(PaintLatticeSize - 1, Mathf.FloorToInt(local.x) + 2);
+        int minZ = Mathf.Max(0, Mathf.FloorToInt(local.z) - 1);
+        int maxZ = Mathf.Min(PaintLatticeSize - 1, Mathf.FloorToInt(local.z) + 2);
+        for (int z = minZ; z <= maxZ; z++)
+        for (int x = minX; x <= maxX; x++)
+            texels[z * PaintLatticeSize + x] = true;
+    }
+
+    private static float NativeSurfaceLocalY(ChunkRenderData data, Vector3 local) {
+        float lx = Mathf.Clamp(local.x, 0f, VoxelChunk.SIZE);
+        float lz = Mathf.Clamp(local.z, 0f, VoxelChunk.SIZE);
+        int x0 = Mathf.Min((int)lx, VoxelChunk.SIZE - 1);
+        int z0 = Mathf.Min((int)lz, VoxelChunk.SIZE - 1);
+        float fx = lx - x0, fz = lz - z0;
+        var h = data.SurfaceLocalY;
+        float y0 = Mathf.Lerp(h[z0 * PaintLatticeSize + x0], h[z0 * PaintLatticeSize + x0 + 1], fx);
+        float y1 = Mathf.Lerp(h[(z0 + 1) * PaintLatticeSize + x0], h[(z0 + 1) * PaintLatticeSize + x0 + 1], fx);
+        return Mathf.Lerp(y0, y1, fz);
+    }
+
+    private static Texture2D NewUndergroundMask(string name) =>
+        new(PaintLatticeSize, PaintLatticeSize) { name = name, wrapMode = TextureWrapMode.Clamp };
+
+    private static void WriteMask(Texture2D mask, Color32[] pixels) {
+        mask.SetPixels32(pixels);
+        mask.Apply();
     }
 
     private void WritePaintBandMask(Texture2D mask, Dictionary<int, byte> paved, int band) {
@@ -124,51 +173,32 @@ public partial class TerraformManager {
                 for (int y = minY; y <= maxY; y++)
                     if (paved.TryGetValue(LatticeIndex(x, y, z), out byte value) && value > weight) weight = value;
             }
-            _paintBandPixels[z * PaintLatticeSize + x] = new Color32((byte)(255 - weight), 0, weight, UndergroundMaskAlpha);
+            int i = z * PaintLatticeSize + x;
+            var dirt = _undergroundBasePixels[i];
+            float w = weight / 255f;
+            _maskPixels[i] = new Color32(
+                (byte)Mathf.RoundToInt(dirt.r * (1f - w)), 0,
+                (byte)Mathf.RoundToInt(Mathf.Lerp(dirt.b, 255f, w)), UndergroundMaskAlpha);
         }
-        mask.SetPixels32(_paintBandPixels);
-        mask.Apply();
+        WriteMask(mask, _maskPixels);
     }
 
-    private void SyncPaintBandMasks(ChunkRenderData data, bool[] paintedBands) {
-        _undergroundPaved.TryGetValue(ChunkKeyOf(data), out var paved);
+    private void SyncUndergroundMasks(ChunkRenderData data, bool[] paintedBands) {
         for (int b = 0; b < PaintBandCount; b++) {
             bool has = data.PaintBandMasks.TryGetValue(b, out var mask);
-            if (!paintedBands[b]) {
-                if (has) {
-                    Destroy(mask);
-                    data.PaintBandMasks.Remove(b);
-                }
-                continue;
-            }
-            if (!has) {
-                mask = new Texture2D(PaintLatticeSize, PaintLatticeSize) {
-                    name = $"TerraformUndergroundPaint_{b}", wrapMode = TextureWrapMode.Clamp,
-                };
-                data.PaintBandMasks[b] = mask;
-            }
-            WritePaintBandMask(mask, paved, b);
+            if (paintedBands[b] && !has) data.PaintBandMasks[b] = NewUndergroundMask($"TerraformUndergroundPaint_{b}");
+            if (paintedBands[b] || !has) continue;
+            Destroy(mask);
+            data.PaintBandMasks.Remove(b);
         }
+        RefreshUndergroundMasks(data);
     }
 
-    private static void DestroyPaintBandMasks(ChunkRenderData data) {
+    private static void DestroyUndergroundMasks(ChunkRenderData data) {
+        if (data.UndergroundMask != null) Destroy(data.UndergroundMask);
+        data.UndergroundMask = null;
         foreach (var mask in data.PaintBandMasks.Values) Destroy(mask);
         data.PaintBandMasks.Clear();
-    }
-
-    private static bool IsUntouchedVoxel(float value) => value <= Terraform.Voxel.Core.Voxel.Solid.Value + 1e-4f;
-
-    private static float OpenSkyFloorLocalY(ChunkRenderData data, List<float> heights, Vector3 origin, int cellX, int cellZ) {
-        float localX = cellX + 0.5f;
-        float localZ = cellZ + 0.5f;
-        float y = VoxelChunk.SIZE;
-        if (IsUntouchedVoxel(SampleSdfTri(data.Chunk, localX, y, localZ))) {
-            float terrainY = SampleHeightmapMeshYCached(
-                data.Heightmap, heights, new Vector3(origin.x + localX, 0f, origin.z + localZ), data.TerrainHeight);
-            y = Mathf.Min(terrainY - origin.y, VoxelChunk.SIZE) - SeamProbeDepth;
-        }
-        while (y > 0f && SampleSdfTri(data.Chunk, localX, y, localZ) > 0f) y -= OpenColumnScanStep;
-        return y;
     }
 
     private const int SurfaceSubmesh     = 0;
@@ -177,23 +207,17 @@ public partial class TerraformManager {
 
     private sealed class SubmeshSorter {
         private readonly ChunkRenderData _data;
-        private readonly List<float> _heights;
-        private readonly Vector3 _origin;
-        private readonly float[] _openFloorCache = new float[VoxelChunk.SIZE * VoxelChunk.SIZE];
         private readonly List<int>[] _bandIndices = new List<int>[PaintBandCount];
 
         public readonly List<int> Surface;
         public readonly List<int> Underground;
         public readonly bool[] PaintedBands;
 
-        public SubmeshSorter(ChunkRenderData data, List<float> heights, bool[] paintedBands, int capacity) {
+        public SubmeshSorter(ChunkRenderData data, bool[] paintedBands, int capacity) {
             _data = data;
-            _heights = heights;
-            _origin = data.MeshObject.transform.position;
             PaintedBands = paintedBands;
             Surface = new List<int>(capacity);
             Underground = new List<int>(capacity);
-            for (int i = 0; i < _openFloorCache.Length; i++) _openFloorCache[i] = float.NaN;
         }
 
         public int UndergroundTriangleCount {
@@ -206,8 +230,15 @@ public partial class TerraformManager {
 
         public bool IsEmpty => Surface.Count == 0 && UndergroundTriangleCount == 0;
 
-        public List<int> For(Vector3 localCentroid) {
-            if (!IsUnderground(localCentroid)) return Surface;
+        public IEnumerable<List<int>> UndergroundLists() {
+            yield return Underground;
+            foreach (var band in _bandIndices)
+                if (band != null) yield return band;
+        }
+
+        public List<int> For(Vector3 localCentroid, Vector3 normal) {
+            if (localCentroid.y > NativeSurfaceLocalY(_data, localCentroid) - UndergroundEnterMarginY) return Surface;
+            if (!HasSolidAbove(_data, localCentroid + normal * UndergroundAirProbe)) return Surface;
             int band = PaintBandOf(localCentroid.y);
             if (!PaintedBands[band]) return Underground;
             return _bandIndices[band] ??= new List<int>();
@@ -224,15 +255,6 @@ public partial class TerraformManager {
             mesh.SetTriangles(Underground, UndergroundSubmesh, calculateBounds: false);
             for (int i = 0; i < data.SubmeshPaintBands.Count; i++)
                 mesh.SetTriangles(_bandIndices[data.SubmeshPaintBands[i]], FirstPaintBandSubmesh + i, calculateBounds: false);
-        }
-
-        private bool IsUnderground(Vector3 localCentroid) {
-            int cellX = Mathf.Clamp(Mathf.FloorToInt(localCentroid.x), 0, VoxelChunk.SIZE - 1);
-            int cellZ = Mathf.Clamp(Mathf.FloorToInt(localCentroid.z), 0, VoxelChunk.SIZE - 1);
-            int index = cellZ * VoxelChunk.SIZE + cellX;
-            if (float.IsNaN(_openFloorCache[index]))
-                _openFloorCache[index] = OpenSkyFloorLocalY(_data, _heights, _origin, cellX, cellZ);
-            return localCentroid.y < _openFloorCache[index] - UndergroundCeilingMargin;
         }
     }
 

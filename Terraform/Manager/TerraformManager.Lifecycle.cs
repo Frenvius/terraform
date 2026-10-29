@@ -20,14 +20,13 @@ public partial class TerraformManager {
                 if (d?.MeshObject != null) Destroy(d.MeshObject);
                 if (d?.Mesh       != null) Destroy(d.Mesh);
                 if (d != null) {
-                    DestroyPaintBandMasks(d);
+                    DestroyUndergroundMasks(d);
                     if (!_pendingBuildHash.ContainsKey(k)) RetainUnloadedChunkSdf(d);
                 }
                 _chunks.Remove(k);
+                HolePunchSystem.Clear(k);
                 _pendingBuildHash.Remove(k);
                 _pendingBuildSince.Remove(k);
-                _postLoadHeightsHash.Remove(k);
-                _postLoadWatchUntil.Remove(k);
             }
         }
 
@@ -35,7 +34,10 @@ public partial class TerraformManager {
             int id = hm.GetInstanceID();
             if (_chunks.ContainsKey(id)) continue;
 
-            if (hm.gameObject.name.Contains("lodMesh")) continue;
+            if (IsLodHeightmap(hm)) {
+                if (_lodSeen.Add(id)) ApplyAllCratersToLod(hm);
+                continue;
+            }
 
             EnsureHeightmapReflection();
             DumpMaterialOnce(hm);
@@ -113,7 +115,6 @@ public partial class TerraformManager {
         }
 
         BuildStabilizedChunks();
-        UpdatePostLoadWatch();
 
         ScanWaterVolumes();
         RefreshWaterLeaks();
@@ -151,86 +152,33 @@ public partial class TerraformManager {
         }
         if (built.Count == 0) return;
 
-        foreach (var data in built)
-            PunchAllHistoricalDigsOnHeightmap(data.Heightmap);
-
-        ResetGrassForAllHistoricalDigs();
-
         foreach (var data in built) {
             RebuildChunkFromHistory(data);
             if (_waters.TryGetValue(data.Heightmap.GetInstanceID(), out var water)) RebuildWaterMeshFromHoles(water);
         }
-
-        foreach (var data in built) {
-            if (data?.Heightmap == null) continue;
-            int id = data.Heightmap.GetInstanceID();
-            _postLoadHeightsHash[id] = ComputeHeightsHash(data.Heightmap);
-            _postLoadWatchUntil[id]  = Time.time + PostLoadWatchDuration;
-        }
-    }
-
-    private void UpdatePostLoadWatch() {
-        if (_postLoadWatchUntil.Count == 0) return;
-
-        List<int> changed = null;
-        List<int> expired = null;
-        foreach (var kv in _postLoadWatchUntil) {
-            int id = kv.Key;
-            if (!_chunks.TryGetValue(id, out var data) || data?.Heightmap == null) {
-                (expired ??= new List<int>()).Add(id);
-                continue;
-            }
-            long current = ComputeHeightsHash(data.Heightmap);
-            if (!_postLoadHeightsHash.TryGetValue(id, out var prev) || current != prev) {
-                _postLoadHeightsHash[id] = current;
-                (changed ??= new List<int>()).Add(id);
-            }
-            if (Time.time > kv.Value)
-                (expired ??= new List<int>()).Add(id);
-        }
-
-        if (changed != null) {
-            foreach (var id in changed) {
-                if (_chunks.TryGetValue(id, out var data) && data?.Heightmap != null) {
-                    RebuildMesh(data);
-                    DebugLog($"[postload-reclamp] hm={data.Heightmap.gameObject.name} heightmap settled → re-clamped voxel mesh");
-                }
-            }
-        }
-
-        if (expired != null) {
-            foreach (var id in expired) {
-                _postLoadWatchUntil.Remove(id);
-                _postLoadHeightsHash.Remove(id);
-            }
-        }
-    }
-
-    private static long ComputeHeightsHash(Heightmap hm) {
-        var heights = GetHeightsArray(hm);
-        if (heights == null) return 0;
-        long h = unchecked((long)14695981039346656037UL);
-        int count = heights.Count;
-        int step = count > 512 ? count / 512 : 1;
-        for (int i = 0; i < count; i += step) {
-            long bits = (long)(heights[i] * 1000000f);
-            h = (h ^ bits) * 1099511628211L;
-        }
-        return h;
     }
 
     private void RetainUnloadedChunkSdf(ChunkRenderData data) {
-        if (data.Chunk == null || !data.Chunk.HasAnyNonDefault()) return;
+        if (data.Chunk == null || !data.Chunk.HasAnyAltered()) return;
         _pendingPersistence[data.ChunkKey] = new ChunkPersistence {
             TerrainHeight   = data.TerrainHeight,
             VoxelData       = data.Chunk.SerializeFull(),
             VoxelDataIsFull = true,
+            AlteredBits     = data.Chunk.SerializeAltered(),
         };
     }
 
-    private static void ResetChunkDigState(ChunkRenderData data) {
-        data.Chunk = new VoxelChunk();
-        data.RenderFootprints.Clear();
+    private void ResetChunkDigState(ChunkRenderData data) {
+        data.Chunk = null;
+        EnsureChunkAllocated(data);
+    }
+
+    private static void RestoreSavedSdf(ChunkRenderData data, ChunkPersistence saved) {
+        float[] values = saved.VoxelDataIsFull
+            ? VoxelChunk.DecodeFull(saved.VoxelData)
+            : VoxelChunk.DecodeQuantized(saved.VoxelData);
+        if (saved.AlteredBits != null) data.Chunk.RestoreAltered(values, saved.AlteredBits);
+        else data.Chunk.RestoreLegacy(values);
     }
 
     private void RebuildChunkFromHistory(ChunkRenderData data) {
@@ -251,11 +199,7 @@ public partial class TerraformManager {
             && _pendingPersistence.TryGetValue(chunkKey, out var savedEntry)
             && savedEntry?.VoxelData != null
             && savedEntry.VoxelData.Length > 0) {
-            if (savedEntry.VoxelDataIsFull)
-                data.Chunk.DeserializeFull(savedEntry.VoxelData);
-            else
-                data.Chunk.DeserializeQuantized(savedEntry.VoxelData);
-            foreach (var dig in digs) AddRenderFootprintFromDig(data, dig);
+            RestoreSavedSdf(data, savedEntry);
             _pendingPersistence.Remove(chunkKey);
             DebugLog($"  restored SDF for chunk ({digs.Count} digs, full={savedEntry.VoxelDataIsFull})");
         } else {
@@ -267,37 +211,9 @@ public partial class TerraformManager {
             DebugLog($"  replayed {replayed} digs onto new chunk");
         }
 
-        int shaped = PunchCellsShapedBySurfaceMoves(data, digs);
-        if (shaped > 0) {
-            data.Heightmap.Poke();
-            ClutterSystem.instance?.ResetGrass(origin + new Vector3(VoxelChunk.SIZE * 0.5f, 0f, VoxelChunk.SIZE * 0.5f), VoxelChunk.SIZE);
-            DebugLog($"  shape-punched {shaped} cells from surface moves");
-        }
-
+        RefreshCellOwnership(data, CellRect.Whole);
         RebuildMesh(data);
         MarkNavDirty(chunkOriginX, chunkOriginZ, chunkOriginX + VoxelChunk.SIZE, chunkOriginZ + VoxelChunk.SIZE);
-    }
-
-    private static void AddRenderFootprintFromDig(ChunkRenderData data, DigRecord dig) {
-        float apronRadius;
-        switch (dig.Mode) {
-            case DigMode.Surface:
-            case DigMode.Raise:
-                apronRadius = dig.Radius * OuterRadiusMultiplier + ExtendedPunchBleed;
-                break;
-            case DigMode.Smooth:
-            case DigMode.Level:
-                apronRadius = dig.Radius;
-                break;
-            default:
-                apronRadius = PickaxeRadius + PickaxeNoiseAmplitude;
-                break;
-        }
-        int minX = Mathf.FloorToInt(dig.WorldPos.x - apronRadius);
-        int maxX = Mathf.FloorToInt(dig.WorldPos.x + apronRadius);
-        int minZ = Mathf.FloorToInt(dig.WorldPos.z - apronRadius);
-        int maxZ = Mathf.FloorToInt(dig.WorldPos.z + apronRadius);
-        AddRenderFootprint(data, minX, maxX + 1, minZ, maxZ + 1);
     }
 
     private static bool ChunkOverlapsDig(int chunkOriginX, int chunkOriginZ, Vector3 worldPos, float radius) {

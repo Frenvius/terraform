@@ -1,17 +1,16 @@
 using System.Collections.Generic;
 using UnityEngine;
+using Terraform.Voxel.Core;
 
 namespace Terraform.Patches;
 
 public partial class TerraformManager {
     private const float WaterSinkDepth = 4f;
     private const float WaterSinkRadius = 6f;
+    private const float WaterBandScanStep = 0.5f;
 
-    public float WaterSinkAt(WaterVolume volume, Vector3 point) {
-        if (volume.m_heightmap == null) return 0f;
-        if (!_waters.TryGetValue(volume.m_heightmap.GetInstanceID(), out var data)) return 0f;
-        return ComputeWaterSink(data, point);
-    }
+    public bool IsWaterUnderOriginalGround(Vector3 point, float waterSurface) =>
+        HasDigsAround(point) && OriginalHeight(point, out float terrainY) && terrainY > waterSurface;
 
     private static float ComputeWaterSink(WaterRenderData data, Vector3 world) {
         if (data.SinkField is not { } field) return 0f;
@@ -141,38 +140,55 @@ public partial class TerraformManager {
     private HashSet<(int x, int y)> CollectWaterOpenCells(WaterRenderData data, Vector3 cellOrigin) {
         var open = new HashSet<(int x, int y)>();
         var hm = data.Heightmap;
-        if (!HolePunchSystem.TryGetCollisionHoles(hm, out var holes) || holes.Count == 0) return open;
+        if (!_chunks.TryGetValue(hm.GetInstanceID(), out var chunk) || chunk?.Chunk == null) return open;
 
-        _chunks.TryGetValue(hm.GetInstanceID(), out var chunk);
         var heights = GetHeightsArray(hm);
         float scale = hm.m_scale;
         float waterY = cellOrigin.y;
-        Vector3 localOrigin = chunk?.Chunk != null ? cellOrigin - chunk.MeshObject.transform.position : Vector3.zero;
+        Vector3 localOrigin = cellOrigin - chunk.MeshObject.transform.position;
+        int bandMin = Mathf.Max(0, Mathf.FloorToInt(localOrigin.y - WaterSinkDepth));
+        int bandMax = Mathf.Min(VoxelChunk.SIZE, Mathf.CeilToInt(localOrigin.y));
+        if (bandMin > bandMax) return open;
 
-        foreach (var cell in holes) {
-            var center = new Vector3(cellOrigin.x + (cell.x + 0.5f) * scale, 0f, cellOrigin.z + (cell.y + 0.5f) * scale);
+        for (int z = 0; z < VoxelChunk.SIZE; z++)
+        for (int x = 0; x < VoxelChunk.SIZE; x++) {
+            if (!CellHasAlteredInBand(chunk.Chunk, x, z, bandMin, bandMax)) continue;
+            var center = new Vector3(cellOrigin.x + (x + 0.5f) * scale, 0f, cellOrigin.z + (z + 0.5f) * scale);
             if (SampleHeightmapMeshYCached(hm, heights, center, waterY) <= waterY) continue;
-            if (chunk?.Chunk != null) {
-                var cellMin = new Vector3(localOrigin.x + cell.x * scale, localOrigin.y, localOrigin.z + cell.y * scale);
-                if (!WaterPlaneOpenInCell(chunk.Chunk, cellMin, scale)) continue;
-            }
-            open.Add(cell);
+            var cellMin = new Vector3(localOrigin.x + x * scale, localOrigin.y, localOrigin.z + z * scale);
+            if (WaterBandOpenInCell(chunk.Chunk, cellMin, scale)) open.Add((x, z));
         }
         return open;
     }
 
-    private static bool WaterPlaneOpenInCell(Terraform.Voxel.Core.VoxelChunk chunk, Vector3 localCellMin, float size) {
-        if (localCellMin.y < 0f || localCellMin.y > Terraform.Voxel.Core.VoxelChunk.SIZE) return false;
-        float half = size * 0.5f;
-        return IsVoxelAirAt(chunk, localCellMin.x + half, localCellMin.y, localCellMin.z + half)
-            || IsVoxelAirAt(chunk, localCellMin.x,        localCellMin.y, localCellMin.z)
-            || IsVoxelAirAt(chunk, localCellMin.x + size, localCellMin.y, localCellMin.z)
-            || IsVoxelAirAt(chunk, localCellMin.x,        localCellMin.y, localCellMin.z + size)
-            || IsVoxelAirAt(chunk, localCellMin.x + size, localCellMin.y, localCellMin.z + size);
+    private static bool CellHasAlteredInBand(VoxelChunk chunk, int cx, int cz, int yMin, int yMax) {
+        for (int y = yMin; y <= yMax; y++) {
+            if (chunk.IsAltered(cx, y, cz) || chunk.IsAltered(cx + 1, y, cz)
+                || chunk.IsAltered(cx, y, cz + 1) || chunk.IsAltered(cx + 1, y, cz + 1)) return true;
+        }
+        return false;
     }
 
-    private static bool IsVoxelAirAt(Terraform.Voxel.Core.VoxelChunk chunk, float x, float y, float z) {
-        int size = Terraform.Voxel.Core.VoxelChunk.SIZE;
+    private static bool WaterBandOpenInCell(VoxelChunk chunk, Vector3 localCellMin, float size) {
+        float top = Mathf.Min(localCellMin.y, VoxelChunk.SIZE);
+        float bottom = Mathf.Max(localCellMin.y - WaterSinkDepth, 0f);
+        for (float y = top; y >= bottom; y -= WaterBandScanStep) {
+            if (WaterPlaneOpenInCell(chunk, localCellMin.x, y, localCellMin.z, size)) return true;
+        }
+        return false;
+    }
+
+    private static bool WaterPlaneOpenInCell(VoxelChunk chunk, float minX, float y, float minZ, float size) {
+        float half = size * 0.5f;
+        return IsVoxelAirAt(chunk, minX + half, y, minZ + half)
+            || IsVoxelAirAt(chunk, minX,        y, minZ)
+            || IsVoxelAirAt(chunk, minX + size, y, minZ)
+            || IsVoxelAirAt(chunk, minX,        y, minZ + size)
+            || IsVoxelAirAt(chunk, minX + size, y, minZ + size);
+    }
+
+    private static bool IsVoxelAirAt(VoxelChunk chunk, float x, float y, float z) {
+        int size = VoxelChunk.SIZE;
         if (x < 0f || x > size || z < 0f || z > size) return false;
         return SampleSdfTri(chunk, x, y, z) > 0f;
     }

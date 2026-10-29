@@ -88,7 +88,7 @@ public static class Player_UpdatePlacementGhost_Patch {
         var op = ghost.GetComponent<TerrainOp>();
         if (op != null && TerraformManager.IsVoxelRaise(op.m_settings))
             return manager.TryGetPlacementSurface(ghostPos, out point, out normal);
-        return manager.TryGetCeilingPlacement(ghostPos, out point, out normal);
+        return manager.TryGetSurfaceAlignedPlacement(ghostPos, out point, out normal);
     }
 }
 

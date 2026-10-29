@@ -111,6 +111,8 @@
     <Compile Include="Configs\ModConfiguration.cs" />
     <Compile Include="Patches\ZNetSceneAwakePatch.cs" />
     <Compile Include="Patches\CharacterUnderWorldCheckPatch.cs" />
+    <Compile Include="Patches\GameCameraNearClipPatch.cs" />
+    <Compile Include="Patches\GameCameraShoulderOffsetPatch.cs" />
     <Compile Include="Patches\FireplaceCavityPatch.cs" />
     <Compile Include="Patches\GameFindSpawnPointPatch.cs" />
     <Compile Include="Patches\ZoneSystemGroundHeightPatch.cs" />
@@ -134,7 +136,6 @@
     <Compile Include="Patches\Types\ChunkRenderData.cs" />
     <Compile Include="Patches\Types\DigMode.cs" />
     <Compile Include="Patches\Types\DigRecord.cs" />
-    <Compile Include="Patches\Types\RenderFootprint.cs" />
     <Compile Include="Patches\Types\WaterRenderData.cs" />
     <Compile Include="Manager\TerraformManager.cs" />
     <Compile Include="Manager\TerraformManager.Reflection.cs" />
@@ -145,7 +146,10 @@
     <Compile Include="Manager\TerraformManager.UndergroundPaint.cs" />
     <Compile Include="Manager\TerraformManager.Dig.cs" />
     <Compile Include="Manager\TerraformManager.HeightmapPunch.cs" />
-    <Compile Include="Manager\TerraformManager.HeightmapSync.cs" />
+    <Compile Include="Manager\TerraformManager.CellOwnership.cs" />
+    <Compile Include="Manager\TerraformManager.TerrainQuery.cs" />
+    <Compile Include="Patches\Types\CellRect.cs" />
+    <Compile Include="Manager\TerraformManager.Seed.cs" />
     <Compile Include="Manager\TerraformManager.Mesh.cs" />
     <Compile Include="Manager\TerraformManager.SurfaceOverlay.cs" />
     <Compile Include="Manager\TerraformManager.Material.cs" />
@@ -163,6 +167,7 @@
     <Compile Include="Voxel\Core\Voxel.cs" />
     <Compile Include="Voxel\Core\VoxelChunk.cs" />
     <Compile Include="Voxel\Meshing\MeshData.cs" />
+    <Compile Include="Voxel\Meshing\MeshingInput.cs" />
     <Compile Include="Voxel\Meshing\MarchingCubesTables.cs" />
     <Compile Include="Voxel\Meshing\MarchingCubesMesher.cs" />
   </ItemGroup>

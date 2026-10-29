@@ -1,4 +1,5 @@
 using UnityEngine;
+using Terraform.Voxel.Core;
 
 namespace Terraform.Patches;
 
@@ -14,9 +15,8 @@ public partial class TerraformManager {
     private const float PlacementSurfaceMatchXZ   = 0.05f;
     private const float CeilingProbeHeight        = 64f;
     private const float CeilingProbeClearance     = 0.3f;
-    private const float HoeRaiseRadiusScale       = 0.6f;
-    private const float HoeRaiseHeightScale       = 0.5f;
-    private const int   ApronRingOutsideFootprint = 1;
+    private const float HoeRaiseRadiusScale       = 0.75f;
+    private const float HoeRaiseHeightScale       = 0.6f;
 
     private readonly RaycastHit[] _ceilingHits = new RaycastHit[16];
     private Vector3 _placementSurfacePoint;
@@ -36,12 +36,20 @@ public partial class TerraformManager {
         if (DiggingBlockedAsClient()) return default;
 
         if (IsVoxelRaise(settings)) {
-            RaiseFromTerrainOp(opPos, settings);
-            settings.m_raise = false;
+            if (OpFitsVerticalWindow(opPos, settings.m_raiseRadius + settings.m_raiseDelta)) {
+                RaiseFromTerrainOp(opPos, settings);
+                settings.m_raise = false;
+            } else {
+                DebugLog("[route] window: raise left to vanilla");
+            }
         }
 
-        if (TryGetCeilingPlacement(opPos, out Vector3 ceilingPoint, out Vector3 ceilingNormal))
-            return BeginCeilingOp(settings, ceilingPoint, ceilingNormal);
+        bool surfaceAligned = TryGetSurfaceAlignedPlacement(opPos, out Vector3 alignedPoint, out Vector3 alignedNormal);
+        if (surfaceAligned && !OpFitsVerticalWindow(alignedPoint, HeightOpRadius(settings))) {
+            DebugLog("[route] window: surface-aligned op left to vanilla");
+            return default;
+        }
+        if (surfaceAligned) return BeginSurfaceAlignedOp(settings, alignedPoint, alignedNormal);
 
         if (settings.m_paintCleared && IsUnderTerrainCeiling(opPos)) {
             PaintUnderground(opPos, settings.m_paintRadius, settings.m_paintType);
@@ -50,7 +58,10 @@ public partial class TerraformManager {
 
         if (!settings.m_level && !settings.m_smooth) return default;
         Vector3 target = LevelTarget(opPos, settings);
-        if (!HasVoxelSurfaceNear(target, HeightOpRadius(settings))) return default;
+        if (!OpFitsVerticalWindow(target, HeightOpRadius(settings))) {
+            DebugLog("[route] window: level / smooth left to vanilla");
+            return default;
+        }
 
         var pass = new TerrainOpVoxelPass {
             Level = settings.m_level, Smooth = settings.m_smooth, Target = target, SurfaceNormal = Vector3.up,
@@ -64,7 +75,7 @@ public partial class TerraformManager {
         settings.m_level  ? settings.m_levelRadius  : 0f,
         settings.m_smooth ? settings.m_smoothRadius : 0f);
 
-    private static TerrainOpVoxelPass BeginCeilingOp(TerrainOp.Settings settings, Vector3 point, Vector3 normal) {
+    private static TerrainOpVoxelPass BeginSurfaceAlignedOp(TerrainOp.Settings settings, Vector3 point, Vector3 normal) {
         var pass = new TerrainOpVoxelPass {
             Level = settings.m_level, Smooth = settings.m_smooth, Target = point, SurfaceNormal = normal,
         };
@@ -98,8 +109,8 @@ public partial class TerraformManager {
         return PlacementSurfaceMatches(opPos);
     }
 
-    public bool TryGetCeilingPlacement(Vector3 opPos, out Vector3 point, out Vector3 normal) {
-        return TryGetPlacementSurface(opPos, out point, out normal) && IsCeilingNormal(normal);
+    public bool TryGetSurfaceAlignedPlacement(Vector3 opPos, out Vector3 point, out Vector3 normal) {
+        return TryGetPlacementSurface(opPos, out point, out normal) && normal.y < GroundOpNormalMinY;
     }
 
     private void RaiseFromTerrainOp(Vector3 opPos, TerrainOp.Settings settings) {
@@ -108,8 +119,8 @@ public partial class TerraformManager {
         if (PlacementSurfaceMatches(opPos)) {
             point  = _placementSurfacePoint;
             normal = _placementSurfaceNormal;
-        } else if (Heightmap.GetHeight(opPos, out float groundY)) {
-            point.y = groundY;
+        } else if (OriginalHeight(opPos, out float groundY)) {
+            point.y = SurfaceHeight(opPos, groundY);
         }
         if (VerboseLogs) DebugLog($"[hoe-raise] radius={settings.m_raiseRadius:F2} delta={settings.m_raiseDelta:F2} power={settings.m_raisePower:F2}");
         PerformRaiseAt(point, normal,
@@ -123,33 +134,15 @@ public partial class TerraformManager {
         return Mathf.Sqrt(dx * dx + dz * dz);
     }
 
-    private bool HasVoxelSurfaceNear(Vector3 worldPos, float radius) {
-        int minX = Mathf.FloorToInt(worldPos.x - radius) - ApronRingOutsideFootprint;
-        int maxX = Mathf.CeilToInt (worldPos.x + radius) + ApronRingOutsideFootprint;
-        int minZ = Mathf.FloorToInt(worldPos.z - radius) - ApronRingOutsideFootprint;
-        int maxZ = Mathf.CeilToInt (worldPos.z + radius) + ApronRingOutsideFootprint;
-
-        foreach (var data in _chunks.Values) {
-            if (data?.Renderer == null || !data.Renderer.enabled) continue;
-            foreach (var footprint in data.RenderFootprints) {
-                if (footprint.MaxX >= minX && footprint.MinX <= maxX &&
-                    footprint.MaxZ >= minZ && footprint.MinZ <= maxZ) return true;
-            }
-        }
-        return false;
-    }
-
     private bool IsUnderTerrainCeiling(Vector3 target) {
-        bool belowHeightmap = Heightmap.GetHeight(target, out float terrainY)
-                              && target.y < terrainY - UndergroundEnterMarginY;
+        if (!OriginalHeight(target, out float terrainY) || target.y >= terrainY - UndergroundEnterMarginY) return false;
 
         Vector3 origin = target + Vector3.up * CeilingProbeHeight;
         float distance = CeilingProbeHeight - CeilingProbeClearance;
         int count = Physics.RaycastNonAlloc(origin, Vector3.down, _ceilingHits, distance, VoxelGroundProbe.TerrainAndPieceMask);
         for (int i = 0; i < count; i++) {
             var hit = _ceilingHits[i];
-            if (VoxelGroundProbe.IsVoxelHit(hit)) return true;
-            if (belowHeightmap && hit.collider.GetComponent<Heightmap>() != null) return true;
+            if (VoxelGroundProbe.IsVoxelHit(hit) || hit.collider.GetComponent<Heightmap>() != null) return true;
         }
         return false;
     }

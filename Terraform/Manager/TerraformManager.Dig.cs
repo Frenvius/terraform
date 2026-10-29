@@ -8,9 +8,6 @@ public partial class TerraformManager {
     private static bool IsCarvingMode(DigMode mode) =>
         mode == DigMode.Surface || mode == DigMode.UndergroundTunnel || mode == DigMode.OpenHoleDeepen;
 
-    private static float SurfacePunchMaxDelta(float radius) =>
-        radius * (1f + ShelfDepthMultiplier) + MinCeilingThickness;
-
     private static float RaiseVerticalRadius(float radius) =>
         Mathf.Max(radius * 1.75f, radius + 0.75f);
 
@@ -63,29 +60,17 @@ public partial class TerraformManager {
             CarveCrater(data, record);
             if (swCarve != null) carveTicks += swCarve.ElapsedTicks;
 
+            RefreshCellOwnership(data, CellRectForDig(data, record));
+
             if (IsCarvingMode(mode)) {
-                DeriveModePunchParams(mode, radius, out float refineRadius, out _);
-                int refMinX = Mathf.FloorToInt(worldPos.x - refineRadius);
-                int refMaxX = Mathf.FloorToInt(worldPos.x + refineRadius);
-                int refMinZ = Mathf.FloorToInt(worldPos.z - refineRadius);
-                int refMaxZ = Mathf.FloorToInt(worldPos.z + refineRadius);
-                int refined = RefinePunchFromVoxel(data, refMinX, refMaxX, refMinZ, refMaxZ);
-                int painted = mode == DigMode.Surface ? 0 : PaintCellsOpenedByVoxel(data, refMinX, refMaxX, refMinZ, refMaxZ);
-                if (refined > 0 || painted > 0) data.Heightmap.Poke();
-                if (refined > 0) {
-                    if (ClutterSystem.instance != null) {
-                        float grassRadius = refineRadius * Mathf.Sqrt(2f) + 0.5f;
-                        ClutterSystem.instance.ResetGrass(worldPos, grassRadius);
-                    }
-                    if (VerboseLogs) DebugLog($"[refine-punch] hm={data.Heightmap.gameObject.name} added={refined}");
-                }
-            } else if (MovesSurface(mode)) {
-                SyncHeightmapToVoxelSurface(data, record);
-                int shaped = PunchCellsShapedByVoxel(data, SurfaceMoveArea(record));
-                if (shaped > 0) {
+                float paintRadius = DigFootprintRadius(record);
+                int painted = PaintCellsOpenedByVoxel(
+                    data,
+                    Mathf.FloorToInt(worldPos.x - paintRadius), Mathf.FloorToInt(worldPos.x + paintRadius),
+                    Mathf.FloorToInt(worldPos.z - paintRadius), Mathf.FloorToInt(worldPos.z + paintRadius));
+                if (painted > 0) {
                     data.Heightmap.Poke();
-                    ClutterSystem.instance?.ResetGrass(worldPos, radius * Mathf.Sqrt(2f) + 0.5f);
-                    if (VerboseLogs) DebugLog($"[shape-punch] hm={data.Heightmap.gameObject.name} added={shaped}");
+                    ClutterSystem.instance?.ResetGrass(worldPos, paintRadius * Mathf.Sqrt(2f) + 0.5f);
                 }
             }
 
@@ -119,7 +104,7 @@ public partial class TerraformManager {
     }
 
     private void CarveCrater(ChunkRenderData data, DigRecord dig) {
-        data.Chunk ??= new VoxelChunk();
+        EnsureChunkAllocated(data);
 
         switch (dig.Mode) {
             case DigMode.Surface:
@@ -130,7 +115,7 @@ public partial class TerraformManager {
                 break;
             case DigMode.Smooth:
             case DigMode.Level:
-                MoveSurfaceTowardPlane(data, dig);
+                FlattenTowardPlane(data, dig);
                 break;
             default:
                 CarvePickaxeSphere(data, dig.WorldPos);
@@ -145,7 +130,6 @@ public partial class TerraformManager {
         int chunkOriginZ = Mathf.RoundToInt(origin.z);
 
         float outerRadius = radius * OuterRadiusMultiplier;
-        float apronRadius = outerRadius + ExtendedPunchBleed;
         float bowlRadius  = radius * BowlRadiusMultiplier;
         float shelfDepth  = radius * ShelfDepthMultiplier;
 
@@ -155,15 +139,6 @@ public partial class TerraformManager {
         int worldCellMaxZ = Mathf.FloorToInt(worldPos.z + outerRadius);
         var punchedMask = BuildPunchedCellMask(
             worldCellMinX, worldCellMaxX, worldCellMinZ, worldCellMaxZ, worldPos, outerRadius);
-
-        int apronMinX = Mathf.FloorToInt(worldPos.x - apronRadius);
-        int apronMaxX = Mathf.FloorToInt(worldPos.x + apronRadius);
-        int apronMinZ = Mathf.FloorToInt(worldPos.z - apronRadius);
-        int apronMaxZ = Mathf.FloorToInt(worldPos.z + apronRadius);
-        AddRenderFootprint(data, apronMinX, apronMaxX + 1, apronMinZ, apronMaxZ + 1);
-
-        SeedHeightmapSdfApron(data, chunkOriginX, chunkOriginY, chunkOriginZ,
-            apronMinX, apronMaxX, apronMinZ, apronMaxZ);
 
         bool IsCurrentCellPunched(int worldX, int worldZ) {
             return IsMaskedCellPunched(punchedMask, worldCellMinX, worldCellMinZ, worldX, worldZ);
@@ -196,10 +171,10 @@ public partial class TerraformManager {
                 if (isBoundary) boundaryCornersTouched++;
                 else            interiorCornersTouched++;
 
-                float terrainY = SampleHeightmapMeshY(
+                float terrainY = ColumnTopY(data, vx, vz, SampleHeightmapMeshY(
                     data.Heightmap,
                     new Vector3(worldVx, 0f, worldVz),
-                    data.TerrainHeight);
+                    data.TerrainHeight));
 
                 float topYWorld = terrainY;
 
@@ -241,9 +216,8 @@ public partial class TerraformManager {
                         sdf = Mathf.Clamp(worldY - bowlFloorYWorld + 0.05f, -1f, 1f);
                     }
 
-                    var v = data.Chunk.Get(vx, yLocal, vz);
-                    if (sdf > v.Value)
-                        data.Chunk.Set(vx, yLocal, vz, new Terraform.Voxel.Core.Voxel { Value = sdf });
+                    if (sdf > data.Chunk.Get(vx, yLocal, vz).Value)
+                        data.Chunk.Write(vx, yLocal, vz, sdf);
                 }
             }
         }
@@ -273,15 +247,6 @@ public partial class TerraformManager {
         int worldVyMax = Mathf.CeilToInt (worldPos.y + maxRadiusY) + 1;
         int worldVzMin = Mathf.FloorToInt(worldPos.z - maxRadius)  - 1;
         int worldVzMax = Mathf.CeilToInt (worldPos.z + maxRadius)  + 1;
-
-        int worldCellMinX = Mathf.FloorToInt(worldPos.x - maxRadius);
-        int worldCellMaxX = Mathf.FloorToInt(worldPos.x + maxRadius);
-        int worldCellMinZ = Mathf.FloorToInt(worldPos.z - maxRadius);
-        int worldCellMaxZ = Mathf.FloorToInt(worldPos.z + maxRadius);
-        AddRenderFootprint(data, worldCellMinX, worldCellMaxX + 1, worldCellMinZ, worldCellMaxZ + 1);
-
-        SeedHeightmapSdfApron(data, chunkOriginX, chunkOriginY, chunkOriginZ,
-            worldCellMinX, worldCellMaxX, worldCellMinZ, worldCellMaxZ);
 
         int writes = 0, cornersOutOfChunk = 0, cornersOutsideSphere = 0;
 
@@ -313,11 +278,8 @@ public partial class TerraformManager {
             sdf = Mathf.Clamp(sdf, -1f, 1f);
             if (sdf == 0f) sdf = 0.001f;
 
-            var v = data.Chunk.Get(vx, vy, vz);
-            if (sdf > v.Value) {
-                data.Chunk.Set(vx, vy, vz, new Terraform.Voxel.Core.Voxel { Value = sdf });
+            if (sdf > data.Chunk.Get(vx, vy, vz).Value && data.Chunk.Write(vx, vy, vz, sdf))
                 writes++;
-            }
         }
 
         if (VerboseLogs) {
@@ -329,260 +291,58 @@ public partial class TerraformManager {
         }
     }
 
-    private enum SurfaceFalloff { SmoothCircle, FlatCircle, FlatSquare }
-
-    private static float SurfaceMoveWeight(SurfaceFalloff falloff, float dx, float dz, float radius) {
-        if (falloff == SurfaceFalloff.FlatSquare)
-            return Mathf.Abs(dx) <= radius && Mathf.Abs(dz) <= radius ? 1f : 0f;
-
-        float distXZ = Mathf.Sqrt(dx * dx + dz * dz);
-        if (distXZ > radius) return 0f;
-        if (falloff == SurfaceFalloff.FlatCircle) return 1f;
-        return 1f - Mathf.Pow(Mathf.Clamp01(distXZ / radius), SmoothPower);
+    private static float FlattenWeight(DigRecord dig, Vector3 delta) {
+        float radius = dig.Radius;
+        if (dig.Mode == DigMode.Level && dig.Square) {
+            bool inside = Mathf.Abs(delta.x) <= radius && Mathf.Abs(delta.y) <= radius && Mathf.Abs(delta.z) <= radius;
+            return inside ? 1f : 0f;
+        }
+        float dist = delta.magnitude;
+        if (dist > radius) return 0f;
+        if (dig.Mode == DigMode.Level) return 1f;
+        return 1f - Mathf.Pow(Mathf.Clamp01(dist / radius), SmoothPower);
     }
 
-    private static float MaxSurfaceStep(SurfaceFalloff falloff) =>
-        falloff == SurfaceFalloff.SmoothCircle ? SmoothMaxStep : LevelMaxStep;
-
-    private static SurfaceFalloff FalloffFor(DigRecord dig) {
-        if (dig.Mode == DigMode.Smooth) return SurfaceFalloff.SmoothCircle;
-        return dig.Square ? SurfaceFalloff.FlatSquare : SurfaceFalloff.FlatCircle;
-    }
-
-    private static bool IsCeilingNormal(Vector3 normal) => normal.y < CeilingNormalMaxY;
-
-    private static RenderFootprint SurfaceMoveColumns(DigRecord dig) => new RenderFootprint {
-        MinX = Mathf.FloorToInt(dig.WorldPos.x - dig.Radius) - 1, MaxX = Mathf.CeilToInt(dig.WorldPos.x + dig.Radius) + 1,
-        MinZ = Mathf.FloorToInt(dig.WorldPos.z - dig.Radius) - 1, MaxZ = Mathf.CeilToInt(dig.WorldPos.z + dig.Radius) + 1,
-    };
-
-    private static ColumnSurfaceQuery SurfaceQueryFor(DigRecord dig, int chunkOriginY) => new ColumnSurfaceQuery {
-        YFloor    = ProtectedYLocalExclusive(chunkOriginY),
-        OriginY   = chunkOriginY,
-        TargetY   = dig.WorldPos.y,
-        FacesDown = IsCeilingNormal(dig.Normal),
-        Reach     = FalloffFor(dig) == SurfaceFalloff.SmoothCircle ? dig.Radius : LevelMaxStep,
-    };
-
-    private void MoveSurfaceTowardPlane(ChunkRenderData data, DigRecord dig) {
-        Vector3 worldPos       = dig.WorldPos;
-        float radius           = dig.Radius;
-        SurfaceFalloff falloff = FalloffFor(dig);
-        bool facesDown         = IsCeilingNormal(dig.Normal);
-        float maxStep  = MaxSurfaceStep(falloff);
+    private void FlattenTowardPlane(ChunkRenderData data, DigRecord dig) {
+        Vector3 center = dig.WorldPos;
+        Vector3 normal = dig.Normal.sqrMagnitude > 0.001f ? dig.Normal.normalized : Vector3.up;
+        float radius   = dig.Radius;
+        float maxStep  = dig.Mode == DigMode.Smooth ? SmoothMaxStep : LevelMaxStep;
         Vector3 origin = data.MeshObject.transform.position;
-        int chunkOriginX = Mathf.RoundToInt(origin.x);
-        int chunkOriginY = Mathf.RoundToInt(origin.y);
-        int chunkOriginZ = Mathf.RoundToInt(origin.z);
-        float targetY    = worldPos.y;
+        int originX = Mathf.RoundToInt(origin.x);
+        int originY = Mathf.RoundToInt(origin.y);
+        int originZ = Mathf.RoundToInt(origin.z);
+        int yFloor  = ProtectedYLocalExclusive(originY);
 
-        int worldCellMinX = Mathf.FloorToInt(worldPos.x - radius);
-        int worldCellMaxX = Mathf.FloorToInt(worldPos.x + radius);
-        int worldCellMinZ = Mathf.FloorToInt(worldPos.z - radius);
-        int worldCellMaxZ = Mathf.FloorToInt(worldPos.z + radius);
-        AddRenderFootprint(data, worldCellMinX, worldCellMaxX + 1, worldCellMinZ, worldCellMaxZ + 1);
-        SeedHeightmapSdfApron(data, chunkOriginX, chunkOriginY, chunkOriginZ,
-            worldCellMinX, worldCellMaxX, worldCellMinZ, worldCellMaxZ);
+        int minX = Mathf.Max(0, Mathf.FloorToInt(center.x - radius) - 1 - originX);
+        int maxX = Mathf.Min(VoxelChunk.SIZE, Mathf.CeilToInt(center.x + radius) + 1 - originX);
+        int minY = Mathf.Max(yFloor, Mathf.FloorToInt(center.y - radius) - 1 - originY);
+        int maxY = Mathf.Min(VoxelChunk.SIZE, Mathf.CeilToInt(center.y + radius) + 1 - originY);
+        int minZ = Mathf.Max(0, Mathf.FloorToInt(center.z - radius) - 1 - originZ);
+        int maxZ = Mathf.Min(VoxelChunk.SIZE, Mathf.CeilToInt(center.z + radius) + 1 - originZ);
 
-        var columns = SurfaceMoveColumns(dig);
-        var query   = SurfaceQueryFor(dig, chunkOriginY);
-        int writes = 0, columnsTouched = 0, columnsNoSurface = 0;
-
-        for (int worldVz = columns.MinZ; worldVz <= columns.MaxZ; worldVz++)
-        for (int worldVx = columns.MinX; worldVx <= columns.MaxX; worldVx++) {
-            int vx = worldVx - chunkOriginX;
-            int vz = worldVz - chunkOriginZ;
-            if (vx < 0 || vx > VoxelChunk.SIZE || vz < 0 || vz > VoxelChunk.SIZE) continue;
-
-            float weight = SurfaceMoveWeight(falloff, worldVx - worldPos.x, worldVz - worldPos.z, radius);
+        int writes = 0;
+        for (int vz = minZ; vz <= maxZ; vz++)
+        for (int vy = minY; vy <= maxY; vy++)
+        for (int vx = minX; vx <= maxX; vx++) {
+            var delta = new Vector3(originX + vx - center.x, originY + vy - center.y, originZ + vz - center.z);
+            float weight = FlattenWeight(dig, delta);
             if (weight <= 0f) continue;
 
-            if (!TryFindColumnSurface(data.Chunk, vx, vz, query, out var surface)) { columnsNoSurface++; continue; }
+            float target  = Mathf.Clamp(Vector3.Dot(delta, normal) + SdfBias, -1f, 1f);
+            float current = data.Chunk.Get(vx, vy, vz).Value;
+            float step    = Mathf.Clamp((target - current) * weight, -maxStep, maxStep);
+            float value   = Mathf.Clamp(current + step, -1f, 1f);
+            if (value == 0f) value = SeedSurfaceValue;
 
-            float surfaceY    = surface.WorldY;
-            float deltaY      = (targetY - surfaceY) * weight;
-            if (deltaY >  maxStep) deltaY =  maxStep;
-            if (deltaY < -maxStep) deltaY = -maxStep;
-            float newSurfaceY = surfaceY + deltaY;
-            if (falloff == SurfaceFalloff.SmoothCircle && surface.OpenToSky)
-                newSurfaceY = LimitStepToOpenSkyNeighbours(data.Chunk, vx, vz, query, surfaceY, newSurfaceY);
-
-            int bandLoWorld = Mathf.FloorToInt(Mathf.Min(surfaceY, newSurfaceY)) - 2;
-            int bandHiWorld = Mathf.CeilToInt (Mathf.Max(surfaceY, newSurfaceY)) + 2;
-            int bandLo = Mathf.Max(surface.WriteLo, bandLoWorld - chunkOriginY);
-            int bandHi = Mathf.Min(surface.WriteHi, bandHiWorld - chunkOriginY);
-
-            columnsTouched++;
-
-            for (int yLocal = bandLo; yLocal <= bandHi; yLocal++) {
-                int worldY = chunkOriginY + yLocal;
-                float planeSdf = facesDown ? newSurfaceY - worldY : worldY - newSurfaceY;
-                if (planeSdf < WrittenSolidMin) planeSdf = WrittenSolidMin;
-                else if (planeSdf > 1f) planeSdf = 1f;
-
-                var v = data.Chunk.Get(vx, yLocal, vz);
-                float newVal = Mathf.Lerp(v.Value, planeSdf, weight);
-                if (newVal < WrittenSolidMin) newVal = WrittenSolidMin;
-                else if (newVal > 1f) newVal = 1f;
-                if (newVal == 0f) newVal = 0.001f;
-                if (Mathf.Abs(newVal - v.Value) < 1e-4f) continue;
-
-                data.Chunk.Set(vx, yLocal, vz, new Terraform.Voxel.Core.Voxel { Value = newVal });
-                writes++;
-            }
+            if (data.Chunk.Write(vx, vy, vz, value)) writes++;
         }
 
         if (VerboseLogs) {
             string hmName = data.Heightmap != null ? data.Heightmap.gameObject.name : "?";
             DebugLog(
-                $"[carve-{falloff}] hm={hmName} pos=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) r={radius:F2} " +
-                $"target={targetY:F2} chunkOrigin=({chunkOriginX},{chunkOriginY},{chunkOriginZ}) " +
-                $"cols={columnsTouched} noSurface={columnsNoSurface} writes={writes}");
-        }
-    }
-
-    private static readonly (int x, int z)[] ColumnNeighbours = { (1, 0), (-1, 0), (0, 1), (0, -1) };
-
-    private static float LimitStepToOpenSkyNeighbours(
-        VoxelChunk chunk, int vx, int vz, ColumnSurfaceQuery query, float surfaceY, float newSurfaceY) {
-        var anyReach = query;
-        anyReach.Reach = float.PositiveInfinity;
-        bool onSeamX = vx == 0 || vx == VoxelChunk.SIZE;
-        bool onSeamZ = vz == 0 || vz == VoxelChunk.SIZE;
-        float lowest = float.PositiveInfinity, highest = float.NegativeInfinity;
-
-        foreach (var (dx, dz) in ColumnNeighbours) {
-            if (dx != 0 && onSeamX || dz != 0 && onSeamZ) continue;
-            if (!TryFindColumnSurface(chunk, vx + dx, vz + dz, anyReach, out var neighbour) || !neighbour.OpenToSky) continue;
-            lowest  = Mathf.Min(lowest, neighbour.WorldY);
-            highest = Mathf.Max(highest, neighbour.WorldY);
-        }
-
-        if (newSurfaceY < surfaceY)
-            return Mathf.Max(newSurfaceY, Mathf.Min(surfaceY, highest - SmoothMaxNeighbourStep));
-        return Mathf.Min(newSurfaceY, Mathf.Max(surfaceY, lowest + SmoothMaxNeighbourStep));
-    }
-
-    private struct ColumnSurfaceQuery {
-        public int YFloor;
-        public int OriginY;
-        public float TargetY;
-        public float Reach;
-        public bool FacesDown;
-    }
-
-    private struct ColumnSurface {
-        public float WorldY;
-        public int WriteLo;
-        public int WriteHi;
-        public bool OpenToSky;
-    }
-
-    private static bool TryFindColumnSurface(VoxelChunk chunk, int vx, int vz, ColumnSurfaceQuery query, out ColumnSurface best) {
-        best = default;
-        float bestDist = float.MaxValue;
-        for (int y = VoxelChunk.SIZE - 1; y >= query.YFloor; y--) {
-            float here  = chunk.Get(vx, y, vz).Value;
-            float above = chunk.Get(vx, y + 1, vz).Value;
-            bool crossing = query.FacesDown
-                ? here >= 0f && above < 0f
-                : here < 0f && above >= 0f;
-            if (!crossing) continue;
-
-            float denom = here - above;
-            float frac  = Mathf.Abs(denom) > 1e-6f ? here / denom : 0f;
-            float surfaceY = query.OriginY + y + frac;
-            float dist = Mathf.Abs(surfaceY - query.TargetY);
-            if (dist > query.Reach || dist >= bestDist) continue;
-
-            int runLo = SameSideRunEnd(chunk, vx, vz, y, -1, query.YFloor);
-            int runHi = SameSideRunEnd(chunk, vx, vz, y + 1, 1, query.YFloor);
-            if (query.TargetY < query.OriginY + runLo || query.TargetY > query.OriginY + runHi) continue;
-
-            bestDist = dist;
-            best = new ColumnSurface {
-                WorldY    = surfaceY,
-                WriteLo   = runLo > query.YFloor ? Mathf.Min(y, runLo + 1) : runLo,
-                WriteHi   = runHi < VoxelChunk.SIZE ? Mathf.Max(y + 1, runHi - 1) : runHi,
-                OpenToSky = !query.FacesDown && runHi == VoxelChunk.SIZE,
-            };
-        }
-        return bestDist < float.MaxValue;
-    }
-
-    private static int SameSideRunEnd(VoxelChunk chunk, int vx, int vz, int startY, int step, int yFloor) {
-        bool solid = chunk.Get(vx, startY, vz).Value < 0f;
-        int y = startY;
-        while (true) {
-            int next = y + step;
-            if (next < yFloor || next > VoxelChunk.SIZE) return y;
-            if (chunk.Get(vx, next, vz).Value < 0f != solid) return y;
-            y = next;
-        }
-    }
-
-    private static void AddRenderFootprint(ChunkRenderData data, int minX, int maxX, int minZ, int maxZ) {
-        const int mergePadding = 1;
-        var next = new RenderFootprint { MinX = minX, MaxX = maxX, MinZ = minZ, MaxZ = maxZ };
-
-        for (int i = 0; i < data.RenderFootprints.Count; i++) {
-            var cur = data.RenderFootprints[i];
-            bool overlaps =
-                next.MaxX + mergePadding >= cur.MinX && next.MinX - mergePadding <= cur.MaxX &&
-                next.MaxZ + mergePadding >= cur.MinZ && next.MinZ - mergePadding <= cur.MaxZ;
-            if (!overlaps) continue;
-
-            next.MinX = Mathf.Min(next.MinX, cur.MinX);
-            next.MaxX = Mathf.Max(next.MaxX, cur.MaxX);
-            next.MinZ = Mathf.Min(next.MinZ, cur.MinZ);
-            next.MaxZ = Mathf.Max(next.MaxZ, cur.MaxZ);
-            data.RenderFootprints.RemoveAt(i);
-            i--;
-        }
-
-        data.RenderFootprints.Add(next);
-    }
-
-    private static void SeedHeightmapSdfApron(
-        ChunkRenderData data,
-        int chunkOriginX,
-        int chunkOriginY,
-        int chunkOriginZ,
-        int worldCellMinX,
-        int worldCellMaxX,
-        int worldCellMinZ,
-        int worldCellMaxZ) {
-        int minVx = worldCellMinX - 1;
-        int maxVx = worldCellMaxX + 2;
-        int minVz = worldCellMinZ - 1;
-        int maxVz = worldCellMaxZ + 2;
-
-        for (int worldVz = minVz; worldVz <= maxVz; worldVz++)
-        for (int worldVx = minVx; worldVx <= maxVx; worldVx++) {
-            int vx = worldVx - chunkOriginX;
-            int vz = worldVz - chunkOriginZ;
-            if (vx < 0 || vx > VoxelChunk.SIZE || vz < 0 || vz > VoxelChunk.SIZE) continue;
-
-            float terrainY = SampleHeightmapMeshY(
-                data.Heightmap,
-                new Vector3(worldVx, 0f, worldVz),
-                data.TerrainHeight);
-
-            int yMinWorld = Mathf.FloorToInt(terrainY) - 2;
-            int yMaxWorld = chunkOriginY + VoxelChunk.SIZE;
-            int yMinLocal = Mathf.Max(ProtectedYLocalExclusive(chunkOriginY), yMinWorld - chunkOriginY);
-            int yMaxLocal = Mathf.Min(VoxelChunk.SIZE, yMaxWorld - chunkOriginY);
-
-            for (int yLocal = yMinLocal; yLocal <= yMaxLocal; yLocal++) {
-                int worldY = chunkOriginY + yLocal;
-                float sdf = Mathf.Clamp(worldY - terrainY, -1f, 1f);
-                if (sdf == 0f) sdf = 0.001f;
-
-                var v = data.Chunk.Get(vx, yLocal, vz);
-                bool isAtDefault = v.Value <= -1f + 1e-5f;
-                if (sdf > v.Value && isAtDefault)
-                    data.Chunk.Set(vx, yLocal, vz, new Terraform.Voxel.Core.Voxel { Value = sdf });
-            }
+                $"[carve-{dig.Mode}] hm={hmName} pos=({center.x:F2},{center.y:F2},{center.z:F2}) r={radius:F2} " +
+                $"normal=({normal.x:F2},{normal.y:F2},{normal.z:F2}) writes={writes}");
         }
     }
 
@@ -598,15 +358,10 @@ public partial class TerraformManager {
         float outerRadius = radius * OuterRadiusMultiplier;
         float verticalRadius = dig.Height > 0f ? dig.Height : RaiseVerticalRadius(radius);
         float shapeScale     = Mathf.Min(verticalRadius, outerRadius);
-        float apronRadius = outerRadius + ExtendedPunchBleed;
         Vector3 normal = surfaceNormal.sqrMagnitude > 0.001f ? surfaceNormal.normalized : Vector3.up;
         float normalYSq = normal.y * normal.y;
-        float capHeight = Mathf.Min(verticalRadius, outerRadius);
-        Vector3 capCenterOffset = -normal * (outerRadius - capHeight);
-        float verticalExtent = dig.Height > 0f
-            ? Mathf.Abs(capCenterOffset.y) + outerRadius + 1f
-            : Mathf.Sqrt(outerRadius * outerRadius * (1f - normalYSq) +
-                         verticalRadius * verticalRadius * normalYSq) + 1f;
+        float verticalExtent = Mathf.Sqrt(outerRadius * outerRadius * (1f - normalYSq) +
+                                          verticalRadius * verticalRadius * normalYSq) + 1f;
 
         float EllipsoidMoundDistance(Vector3 delta) {
             float axial = Vector3.Dot(delta, normal);
@@ -623,15 +378,6 @@ public partial class TerraformManager {
         int worldCellMaxZ = Mathf.FloorToInt(worldPos.z + outerRadius);
         var punchedMask = BuildPunchedCellMask(
             worldCellMinX, worldCellMaxX, worldCellMinZ, worldCellMaxZ, worldPos, outerRadius);
-
-        int apronMinX = Mathf.FloorToInt(worldPos.x - apronRadius);
-        int apronMaxX = Mathf.FloorToInt(worldPos.x + apronRadius);
-        int apronMinZ = Mathf.FloorToInt(worldPos.z - apronRadius);
-        int apronMaxZ = Mathf.FloorToInt(worldPos.z + apronRadius);
-        AddRenderFootprint(data, apronMinX, apronMaxX + 1, apronMinZ, apronMaxZ + 1);
-
-        SeedHeightmapSdfApron(data, chunkOriginX, chunkOriginY, chunkOriginZ,
-            apronMinX, apronMaxX, apronMinZ, apronMaxZ);
 
         bool IsCurrentCellPunched(int worldX, int worldZ) {
             return IsMaskedCellPunched(punchedMask, worldCellMinX, worldCellMinZ, worldX, worldZ);
@@ -669,17 +415,13 @@ public partial class TerraformManager {
                 for (int yLocal = yMinLocal; yLocal <= yMaxLocal; yLocal++) {
                     int worldY = chunkOriginY + yLocal;
                     Vector3 delta = new Vector3(voxDx, worldY - worldPos.y, voxDz);
-                    float shapeDistance = dig.Height > 0f
-                        ? (delta - capCenterOffset).magnitude - outerRadius
-                        : EllipsoidMoundDistance(delta);
+                    float shapeDistance = EllipsoidMoundDistance(delta);
                     if (shapeDistance >= 1f) continue;
 
-                    float sdf = Mathf.Clamp(shapeDistance + 0.05f, WrittenSolidMin, 1f);
+                    float sdf = Mathf.Clamp(shapeDistance + 0.05f, -1f, 1f);
 
-                    var v = data.Chunk.Get(vx, yLocal, vz);
-                    bool isAtDefault = v.Value <= -1f + 1e-5f;
-                    if (sdf < v.Value || (isAtDefault && sdf < 0f))
-                        data.Chunk.Set(vx, yLocal, vz, new Terraform.Voxel.Core.Voxel { Value = sdf });
+                    if (sdf < data.Chunk.Get(vx, yLocal, vz).Value)
+                        data.Chunk.Write(vx, yLocal, vz, sdf);
                 }
             }
         }

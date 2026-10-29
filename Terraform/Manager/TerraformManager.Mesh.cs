@@ -1,21 +1,38 @@
 using System.Collections.Generic;
+using HarmonyLib;
 using UnityEngine;
 using Terraform.Voxel.Core;
+using Terraform.Voxel.Meshing;
 
 namespace Terraform.Patches;
 
 public partial class TerraformManager {
+    private static readonly AccessTools.FieldRef<Heightmap, Mesh> HeightmapRenderMesh =
+        AccessTools.FieldRefAccess<Heightmap, Mesh>("m_renderMesh");
+
+    private static readonly Vector3[] s_heightmapNormals = new Vector3[(VoxelChunk.SIZE + 1) * (VoxelChunk.SIZE + 1)];
+
+    private struct MeshStats {
+        public int DroppedDegenerate;
+        public int OpenEdges;
+        public int Analytic;
+        public bool NormalsFromRenderMesh;
+    }
+
     private void RebuildMesh(ChunkRenderData data) {
         _waterStreamsDirty = true;
-        if (data.Chunk == null) {
+        var heights = data.Chunk != null ? GetHeightsArray(data.Heightmap) : null;
+        int cornerStride = VoxelChunk.SIZE + 1;
+        if (data.Chunk == null || heights == null || heights.Count < cornerStride * cornerStride) {
             data.Mesh.Clear();
             SetChunkVisible(data, false);
             if (data.Collider != null) data.Collider.sharedMesh = null;
             return;
         }
 
+        Vector3 origin = data.MeshObject.transform.position;
         var swMc = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
-        var meshData = Terraform.Voxel.Meshing.MarchingCubesMesher.Build(data.Chunk);
+        var meshData = MarchingCubesMesher.Build(data.Chunk, BuildMeshingInput(data, heights, origin));
         long mcTicks = swMc?.ElapsedTicks ?? 0;
         data.Mesh.Clear();
 
@@ -25,8 +42,6 @@ public partial class TerraformManager {
             return;
         }
 
-        Vector3 origin = data.MeshObject.transform.position;
-        var heights = GetHeightsArray(data.Heightmap);
         var cornerBiomes = GetCornerBiomes(data.Heightmap);
         Color32 biome00 = CornerBiomeColor(cornerBiomes, 0);
         Color32 biome10 = CornerBiomeColor(cornerBiomes, 1);
@@ -34,57 +49,15 @@ public partial class TerraformManager {
         Color32 biome11 = CornerBiomeColor(cornerBiomes, 3);
 
         var swSamp = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
-        var verts  = new Vector3[meshData.Vertices.Count];
-        var uvs    = new Vector2[meshData.Vertices.Count];
-        var colors = new Color32[meshData.Vertices.Count];
-        var terrainNormals = new Vector3[meshData.Vertices.Count];
-        var aboveTerrain = new bool[meshData.Vertices.Count];
-        var offsetAboveTerrain = new float[meshData.Vertices.Count];
-        var vertexStates = new CellState[meshData.Vertices.Count];
-        float maxOffset = float.NegativeInfinity;
-        int aboveTerrainCount = 0;
-        int seamWelded = 0, seamPreviouslyUnwelded = 0;
-        for (int i = 0; i < verts.Length; i++) {
+        int vertexCount = meshData.Vertices.Count;
+        var verts  = new Vector3[vertexCount];
+        var uvs    = new Vector2[vertexCount];
+        var colors = new Color32[vertexCount];
+        var stats = new MeshStats();
+        for (int i = 0; i < vertexCount; i++) {
             var v = meshData.Vertices[i];
-            var worldXZ = new Vector3(origin.x + v.X, 0f, origin.z + v.Z);
-
-            float terrainY = SampleHeightmapMeshYCached(data.Heightmap, heights, worldXZ, data.TerrainHeight);
-            terrainNormals[i] = SampleHeightmapMeshNormalCached(data.Heightmap, heights, worldXZ, Vector3.up);
-
-            float localTerrainY = terrainY - origin.y;
-            float offset        = v.Y - localTerrainY;
-            offsetAboveTerrain[i] = offset;
-            if (offset > maxOffset) maxOffset = offset;
-            aboveTerrain[i]     = v.Y > localTerrainY;
-            if (aboveTerrain[i]) aboveTerrainCount++;
-
-            float clampedY;
-            CellState heightmapState = CellState.Outside;
-            bool needsHeightmapState = Mathf.Abs(offset) < ShallowAboveKeep
-                || (offset < 0f && offset > -SeamSnapDepth)
-                || offset > 0f;
-            bool onPunchSeam = false;
-            if (needsHeightmapState)
-                heightmapState = ClassifyVertexCells(data.Heightmap, origin, v.X, v.Z, out onPunchSeam);
-            vertexStates[i] = heightmapState;
-
-            if (onPunchSeam) {
-                clampedY = localTerrainY;
-                seamWelded++;
-                if (VerboseLogs && ClassifyPoint(data.Heightmap, worldXZ) != CellState.Punched)
-                    seamPreviouslyUnwelded++;
-            } else if (Mathf.Abs(offset) < ShallowAboveKeep) {
-                clampedY = heightmapState == CellState.Intact
-                    ? localTerrainY - SeamInset
-                    : localTerrainY;
-            } else if (offset < 0f && offset > -SeamSnapDepth && heightmapState == CellState.Punched) {
-                clampedY = localTerrainY;
-            } else if (offset > 0f && heightmapState == CellState.Punched) {
-                clampedY = v.Y;
-            } else {
-                clampedY = Mathf.Min(v.Y, localTerrainY);
-            }
-            verts[i] = new Vector3(v.X, clampedY, v.Z);
+            verts[i] = new Vector3(v.X, v.Y, v.Z);
+            if (meshData.OnTerrainSurface[i]) stats.Analytic++;
 
             float uvX = v.X / VoxelChunk.SIZE;
             float uvZ = v.Z / VoxelChunk.SIZE;
@@ -97,81 +70,21 @@ public partial class TerraformManager {
         }
         long sampTicks = swSamp?.ElapsedTicks ?? 0;
 
+        stats.NormalsFromRenderMesh = TryBuildHeightmapNormalLookup(data.Heightmap);
+        var normals = BuildVertexNormals(data, heights, meshData, verts, origin, stats.NormalsFromRenderMesh);
+
         var swFilt = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
         var srcIndices = meshData.Indices;
-        var submeshes = new SubmeshSorter(data, heights, CollectPaintedBands(data), srcIndices.Count);
-        var surfaceIndices = submeshes.Surface;
-        int droppedChimney = 0, droppedDegenerate = 0;
-        int keptRimRecovered  = 0;
-        int dropAboveTinyEps      = 0;
-        int droppedOutsideFootprint = 0;
-        int droppedSurfaceOverlap = 0;
-        const int kMaxChimneySamples = 15;
-        const float kNearSurfaceDepth = 0.18f;
-        var chimneyDropSamples = new List<(int i0, int i1, int i2)>(kMaxChimneySamples);
-        const float kAbsoluteMaxAboveTerrain = 15f;
-        const float kMaxTriangleYSpan = 20f;
+        var submeshes = new SubmeshSorter(data, CollectPaintedBands(data), srcIndices.Count);
         for (int t = 0; t + 2 < srcIndices.Count; t += 3) {
             int i0 = srcIndices[t], i1 = srcIndices[t + 1], i2 = srcIndices[t + 2];
-            Vector3 a = verts[i0], b = verts[i1], c = verts[i2];
-            float maxVertexAbove = Mathf.Max(offsetAboveTerrain[i0], Mathf.Max(offsetAboveTerrain[i1], offsetAboveTerrain[i2]));
-            float ySpan = Mathf.Max(a.y, Mathf.Max(b.y, c.y)) - Mathf.Min(a.y, Mathf.Min(b.y, c.y));
-            bool needsTerraformEditState = maxVertexAbove > kAbsoluteMaxAboveTerrain
-                || ySpan > kMaxTriangleYSpan
-                || (aboveTerrain[i0] && aboveTerrain[i1] && aboveTerrain[i2]
-                    && Mathf.Max(offsetAboveTerrain[i0], Mathf.Max(offsetAboveTerrain[i1], offsetAboveTerrain[i2])) > SeamSnapDepth);
-            bool overlapsFootprint = TriangleOverlapsRenderFootprint(data, origin, a, b, c);
-            bool isTerraformEdit = false;
-            if (needsTerraformEditState && overlapsFootprint) {
-                Vector3 centroid = (a + b + c) / 3f;
-                Vector3 worldCentroid = origin + centroid;
-                isTerraformEdit = ClassifyPoint(data.Heightmap, worldCentroid) == CellState.Punched;
-            }
-            if (maxVertexAbove > kAbsoluteMaxAboveTerrain && !isTerraformEdit) {
-                droppedChimney++;
-                if (chimneyDropSamples.Count < kMaxChimneySamples)
-                    chimneyDropSamples.Add((i0, i1, i2));
+            if (IsCollapsedTriangle(i0, i1, i2)) {
+                stats.DroppedDegenerate++;
                 continue;
             }
-            if (ySpan > kMaxTriangleYSpan && !isTerraformEdit) {
-                droppedChimney++;
-                if (chimneyDropSamples.Count < kMaxChimneySamples)
-                    chimneyDropSamples.Add((i0, i1, i2));
-                continue;
-            }
-            if (aboveTerrain[i0] && aboveTerrain[i1] && aboveTerrain[i2]) {
-                float maxAbove = Mathf.Max(offsetAboveTerrain[i0], Mathf.Max(offsetAboveTerrain[i1], offsetAboveTerrain[i2]));
-                if (maxAbove > SeamSnapDepth && !isTerraformEdit) {
-                    droppedChimney++;
-                    if (offsetAboveTerrain[i0] < 0.01f && offsetAboveTerrain[i1] < 0.01f && offsetAboveTerrain[i2] < 0.01f)
-                        dropAboveTinyEps++;
-                    if (chimneyDropSamples.Count < kMaxChimneySamples)
-                        chimneyDropSamples.Add((i0, i1, i2));
-                    continue;
-                }
-                keptRimRecovered++;
-            }
-            if (!overlapsFootprint) {
-                droppedOutsideFootprint++;
-                if (chimneyDropSamples.Count < kMaxChimneySamples)
-                    chimneyDropSamples.Add((i0, i1, i2));
-                continue;
-            }
-            float offA = offsetAboveTerrain[i0], offB = offsetAboveTerrain[i1], offC = offsetAboveTerrain[i2];
-            bool triangleNearOrAboveSurface =
-                offA >= -kNearSurfaceDepth && offB >= -kNearSurfaceDepth && offC >= -kNearSurfaceDepth;
-            if (triangleNearOrAboveSurface && IsSurfaceOverlayOnIntactHeightmap(
-                    data, origin, a, b, c, vertexStates[i0], vertexStates[i1], vertexStates[i2])) {
-                droppedSurfaceOverlap++;
-                if (chimneyDropSamples.Count < kMaxChimneySamples)
-                    chimneyDropSamples.Add((i0, i1, i2));
-                continue;
-            }
-            if (Vector3.Cross(b - a, c - a).sqrMagnitude < 1e-6f) {
-                droppedDegenerate++;
-                continue;
-            }
-            var target = submeshes.For((a + b + c) / 3f);
+            var target = submeshes.For(
+                (verts[i0] + verts[i1] + verts[i2]) / 3f,
+                (normals[i0] + normals[i1] + normals[i2]).normalized);
             target.Add(i0);
             target.Add(i1);
             target.Add(i2);
@@ -181,28 +94,8 @@ public partial class TerraformManager {
         if (submeshes.IsEmpty) {
             SetChunkVisible(data, false);
             if (data.Collider != null) data.Collider.sharedMesh = null;
-            DebugLog($"[mesh] chunk={data.Heightmap?.gameObject.name} all triangles filtered → renderer disabled");
+            DebugLog($"[mesh] chunk={data.Heightmap?.gameObject.name} all triangles filtered, renderer disabled");
             return;
-        }
-
-        const float kShelfDepthRange   = 1.75f;
-        const float kTerrainNormalBlend = 1.0f;
-        var sdfNormals = new Vector3[verts.Length];
-        for (int i = 0; i < verts.Length; i++) {
-            var v = meshData.Vertices[i];
-            Vector3 n = ComputeSdfNormal(data.Chunk, v.X, v.Y, v.Z);
-            float depthBelow = -offsetAboveTerrain[i];
-            if (depthBelow < kShelfDepthRange && offsetAboveTerrain[i] < 0.25f) {
-                depthBelow = Mathf.Max(0f, depthBelow);
-                float falloff = 1f - depthBelow / kShelfDepthRange;
-                Vector3 terrainN = terrainNormals[i];
-                if (terrainN.sqrMagnitude > 0.5f) {
-                    n = Vector3.Slerp(n, terrainN.normalized, kTerrainNormalBlend * falloff);
-                    n.Normalize();
-                }
-                n.Normalize();
-            }
-            sdfNormals[i] = n;
         }
 
         data.Mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
@@ -210,13 +103,14 @@ public partial class TerraformManager {
         data.Mesh.uv          = uvs;
         data.Mesh.colors32    = colors;
         submeshes.ApplyTo(data);
-        data.Mesh.normals     = sdfNormals;
+        data.Mesh.normals     = normals;
         data.Mesh.RecalculateTangents();
         data.Mesh.RecalculateBounds();
-        SyncPaintBandMasks(data, submeshes.PaintedBands);
+        MarkSurfaceSeamTexels(data, verts, meshData.OnTerrainSurface, submeshes);
+        SyncUndergroundMasks(data, submeshes.PaintedBands);
 
         DebugLog(
-            $"[mesh] verts={verts.Length} surfaceTris={surfaceIndices.Count / 3} undergroundTris={submeshes.UndergroundTriangleCount} paintBands={data.SubmeshPaintBands.Count}");
+            $"[mesh] verts={verts.Length} surfaceTris={submeshes.Surface.Count / 3} undergroundTris={submeshes.UndergroundTriangleCount} paintBands={data.SubmeshPaintBands.Count}");
 
         if (data.Collider != null) {
             data.Collider.sharedMesh = null;
@@ -229,47 +123,80 @@ public partial class TerraformManager {
 
         if (VerboseLogs) {
             float toMs(long t) => (float)(t * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
-            DebugLog($"[perf] RebuildMesh mc={toMs(mcTicks):F1}ms samp={toMs(sampTicks):F1}ms filt={toMs(filtTicks):F1}ms tris={surfaceIndices.Count / 3}");
-            DebugLog($"[seam] welded={seamWelded} previouslyUnwelded={seamPreviouslyUnwelded}");
+            DebugLog($"[perf] RebuildMesh mc={toMs(mcTicks):F1}ms samp={toMs(sampTicks):F1}ms filt={toMs(filtTicks):F1}ms tris={submeshes.Surface.Count / 3}");
+            stats.OpenEdges = CountOpenEdges(meshData);
+            LogMeshDiagnostics(data, verts, submeshes.Surface, stats);
         }
+    }
 
-        if (VerboseLogs) {
-            LogMeshDiagnostics(data, verts, surfaceIndices,
-                droppedChimney, droppedDegenerate, keptRimRecovered,
-                dropAboveTinyEps,
-                droppedOutsideFootprint, droppedSurfaceOverlap,
-                offsetAboveTerrain, aboveTerrainCount, maxOffset,
-                chimneyDropSamples, origin);
+    private static MeshingInput BuildMeshingInput(ChunkRenderData data, List<float> heights, Vector3 origin) {
+        int count = (VoxelChunk.SIZE + 1) * (VoxelChunk.SIZE + 1);
+        var local = data.SurfaceLocalY ??= new float[count];
+        float shift = data.Heightmap.transform.position.y - origin.y;
+        for (int i = 0; i < count; i++) local[i] = heights[i] + shift;
+        return new MeshingInput(data.CellReplaced, local);
+    }
+
+    private static bool TryBuildHeightmapNormalLookup(Heightmap hm) {
+        var mesh = HeightmapRenderMesh(hm);
+        if (mesh == null) return false;
+
+        var meshNormals = mesh.normals;
+        var meshVerts = mesh.vertices;
+        if (meshNormals.Length == 0 || meshNormals.Length != meshVerts.Length) return false;
+
+        int stride = VoxelChunk.SIZE + 1;
+        float half = hm.m_width * hm.m_scale * 0.5f;
+        float invScale = 1f / hm.m_scale;
+        System.Array.Clear(s_heightmapNormals, 0, s_heightmapNormals.Length);
+
+        int filled = 0;
+        for (int i = 0; i < meshVerts.Length; i++) {
+            int x = Mathf.RoundToInt((meshVerts[i].x + half) * invScale);
+            int z = Mathf.RoundToInt((meshVerts[i].z + half) * invScale);
+            if (x < 0 || z < 0 || x >= stride || z >= stride) continue;
+            int index = z * stride + x;
+            if (s_heightmapNormals[index].sqrMagnitude < 0.5f && meshNormals[i].sqrMagnitude >= 0.5f) filled++;
+            s_heightmapNormals[index] = meshNormals[i];
         }
+        return filled == stride * stride;
+    }
+
+    private static Vector3 SampleHeightmapNormalLookup(float x, float z) {
+        int stride = VoxelChunk.SIZE + 1;
+        x = Mathf.Clamp(x, 0f, VoxelChunk.SIZE);
+        z = Mathf.Clamp(z, 0f, VoxelChunk.SIZE);
+        int x0 = Mathf.Min((int)x, VoxelChunk.SIZE - 1);
+        int z0 = Mathf.Min((int)z, VoxelChunk.SIZE - 1);
+        float fx = x - x0, fz = z - z0;
+        Vector3 n00 = s_heightmapNormals[z0 * stride + x0];
+        Vector3 n10 = s_heightmapNormals[z0 * stride + x0 + 1];
+        Vector3 n01 = s_heightmapNormals[(z0 + 1) * stride + x0];
+        Vector3 n11 = s_heightmapNormals[(z0 + 1) * stride + x0 + 1];
+        Vector3 n = Vector3.Lerp(Vector3.Lerp(n00, n10, fx), Vector3.Lerp(n01, n11, fx), fz);
+        return n.sqrMagnitude > 1e-6f ? n.normalized : Vector3.up;
+    }
+
+    private static Vector3[] BuildVertexNormals(
+        ChunkRenderData data, List<float> heights, MeshData meshData, Vector3[] verts, Vector3 origin, bool useRenderMeshNormals) {
+        var normals = new Vector3[verts.Length];
+        for (int i = 0; i < verts.Length; i++) {
+            Vector3 p = verts[i];
+            if (!meshData.OnTerrainSurface[i]) {
+                normals[i] = ComputeSdfNormal(data.Chunk, p.x, p.y, p.z);
+                continue;
+            }
+
+            normals[i] = useRenderMeshNormals
+                ? SampleHeightmapNormalLookup(p.x, p.z)
+                : SampleHeightmapMeshNormalCached(data.Heightmap, heights, new Vector3(origin.x + p.x, 0f, origin.z + p.z), Vector3.up);
+        }
+        return normals;
     }
 
     private static void SetChunkVisible(ChunkRenderData data, bool visible) {
         data.Renderer.enabled = visible;
         if (data.FillLight != null) data.FillLight.enabled = visible;
-    }
-
-    private static bool TriangleOverlapsRenderFootprint(
-        ChunkRenderData data,
-        Vector3 origin,
-        Vector3 a,
-        Vector3 b,
-        Vector3 c) {
-        if (data.RenderFootprints.Count == 0) return true;
-
-        float minX = origin.x + Mathf.Min(a.x, Mathf.Min(b.x, c.x));
-        float maxX = origin.x + Mathf.Max(a.x, Mathf.Max(b.x, c.x));
-        float minZ = origin.z + Mathf.Min(a.z, Mathf.Min(b.z, c.z));
-        float maxZ = origin.z + Mathf.Max(a.z, Mathf.Max(b.z, c.z));
-
-        const float eps = 0.02f;
-        for (int i = 0; i < data.RenderFootprints.Count; i++) {
-            var fp = data.RenderFootprints[i];
-            if (maxX < fp.MinX - eps || minX > fp.MaxX + eps) continue;
-            if (maxZ < fp.MinZ - eps || minZ > fp.MaxZ + eps) continue;
-            return true;
-        }
-
-        return false;
     }
 
     private static float SampleHeightmapMeshY(Heightmap hm, Vector3 worldXZ, float fallback) {
@@ -373,12 +300,41 @@ public partial class TerraformManager {
         return span > 1e-6f ? 2f * h / span : 1f;
     }
 
-    private static void LogMeshDiagnostics(ChunkRenderData data, Vector3[] verts, List<int> indices,
-                                            int droppedChimney, int droppedDegenerate, int keptRimRecovered,
-                                            int dropAboveTinyEps,
-                                            int droppedOutsideFootprint, int droppedSurfaceOverlap,
-                                            float[] offsetAboveTerrain, int aboveTerrainCount, float maxOffset,
-                                            List<(int i0, int i1, int i2)> chimneyDropSamples, Vector3 origin) {
+    private static bool IsCollapsedTriangle(int i0, int i1, int i2) => i0 == i1 || i1 == i2 || i0 == i2;
+
+    private static int CountOpenEdges(MeshData meshData) {
+        var indices = meshData.Indices;
+        var uses = new Dictionary<long, int>(indices.Count);
+        for (int t = 0; t + 2 < indices.Count; t += 3) {
+            int i0 = indices[t], i1 = indices[t + 1], i2 = indices[t + 2];
+            if (IsCollapsedTriangle(i0, i1, i2)) continue;
+            CountEdgeUse(i0, i1, uses);
+            CountEdgeUse(i1, i2, uses);
+            CountEdgeUse(i2, i0, uses);
+        }
+
+        int open = 0;
+        foreach (var edge in uses) {
+            if (edge.Value != 1) continue;
+            int a = (int)(edge.Key >> 32), b = (int)(edge.Key & 0xFFFFFFFF);
+            if (meshData.OnTerrainSurface[a] || meshData.OnTerrainSurface[b]) continue;
+            if (IsOnChunkBorder(meshData.Vertices[a]) && IsOnChunkBorder(meshData.Vertices[b])) continue;
+            open++;
+        }
+        return open;
+    }
+
+    private static void CountEdgeUse(int a, int b, Dictionary<long, int> uses) {
+        long key = a < b ? ((long)a << 32) | (uint)b : ((long)b << 32) | (uint)a;
+        uses.TryGetValue(key, out int count);
+        uses[key] = count + 1;
+    }
+
+    private static bool IsOnChunkBorder(Vertex3 v) =>
+        v.X <= 0f || v.X >= VoxelChunk.SIZE || v.Z <= 0f || v.Z >= VoxelChunk.SIZE ||
+        v.Y <= 0f || v.Y >= VoxelChunk.SIZE;
+
+    private static void LogMeshDiagnostics(ChunkRenderData data, Vector3[] verts, List<int> indices, MeshStats stats) {
         var used = new bool[verts.Length];
         for (int i = 0; i < indices.Count; i++) used[indices[i]] = true;
 
@@ -416,25 +372,11 @@ public partial class TerraformManager {
 
         string hmName = data.Heightmap != null ? data.Heightmap.gameObject.name : "?";
         TerraformPlugin.Log.LogInfo(
-            $"[mesh] hm={hmName} verts={verts.Length} tris={triCount} " +
-            $"dropChimney={droppedChimney}(tinyEps={dropAboveTinyEps}) " +
-            $"dropOutsideFootprint={droppedOutsideFootprint} " +
-            $"dropSurfaceOverlap={droppedSurfaceOverlap} " +
-            $"dropDegen={droppedDegenerate} " +
-            $"aboveTerrain={aboveTerrainCount}/{verts.Length} maxOffset={maxOffset:F4}u " +
+            $"[mesh] hm={hmName} verts={verts.Length} tris={triCount} analytic={stats.Analytic} " +
+            $"dropDegen={stats.DroppedDegenerate} open={stats.OpenEdges} " +
+            $"normals={(stats.NormalsFromRenderMesh ? "renderMesh" : "heights")} " +
             $"up={up} down={down} side={side} folds={folds} " +
             $"badNormals={badN} badTangents={badT} degenerateTris={degenerate}");
-
-        for (int s = 0; s < chimneyDropSamples.Count; s++) {
-            var (i0, i1, i2) = chimneyDropSamples[s];
-            Vector3 w0 = verts[i0] + origin;
-            Vector3 w1 = verts[i1] + origin;
-            Vector3 w2 = verts[i2] + origin;
-            TerraformPlugin.Log.LogInfo(
-                $"[mesh]   drop#{s} " +
-                $"w=({w0.x:F3},{w0.y:F3},{w0.z:F3})/({w1.x:F3},{w1.y:F3},{w1.z:F3})/({w2.x:F3},{w2.y:F3},{w2.z:F3}) " +
-                $"above=({offsetAboveTerrain[i0]:F4},{offsetAboveTerrain[i1]:F4},{offsetAboveTerrain[i2]:F4})");
-        }
     }
 
     private static void CheckEdge(int a, int b, int faceIdx, Dictionary<long, int> edgeFace, Vector3[] faceNormals, ref int folds) {

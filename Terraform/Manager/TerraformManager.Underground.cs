@@ -26,12 +26,7 @@ public partial class TerraformManager {
         float terrainY;
         if (!Heightmap.GetHeight(playerPos, out terrainY)) return;
 
-        bool playerBelowTerrain = playerPos.y < terrainY - UndergroundEnterMarginY;
-        bool hasVoxelMesh =
-            _chunks.TryGetValue(currentHm.GetInstanceID(), out var data)
-            && data.Renderer != null
-            && data.Renderer.enabled;
-        bool shouldIgnore = playerBelowTerrain && hasVoxelMesh;
+        bool shouldIgnore = IsBelowNativeSurface(playerPos) && IsVoxelAir(playerPos + Vector3.up * UndergroundProbeUp);
 
         if (shouldIgnore) {
             var bounds = playerCol.bounds;

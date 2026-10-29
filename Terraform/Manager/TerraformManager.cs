@@ -12,43 +12,35 @@ public partial class TerraformManager : MonoBehaviour {
     private Dictionary<long, ChunkPersistence> _pendingPersistence = new();
     private readonly Dictionary<int, long> _pendingBuildHash = new();
     private readonly Dictionary<int, float> _pendingBuildSince = new();
-    private readonly Dictionary<int, long> _postLoadHeightsHash = new();
-    private readonly Dictionary<int, float> _postLoadWatchUntil = new();
-    private const float PostLoadWatchDuration = 20f;
     private bool _persistenceLoaded;
     private bool _saveSubscribed;
     private float _scanTimer;
     private const float ScanInterval = 1f;
-    private const float UndergroundEnterMarginY = 1.0f;
+    internal const float UndergroundEnterMarginY = 1.0f;
 
     private const float NoiseFrequency        = 0.12f;
     private const float NoiseAmplitude        = 0.03f;
     private const float NoiseOffset           = 137.42f;
     private const float OuterRadiusMultiplier = 1.55f;
     private const float BowlRadiusMultiplier  = 0.65f;
-    private const float ShelfDepthMultiplier  = 0.4f;
+    private const float ShelfDepthMultiplier  = 0.2f;
     private const float RimFeatherExtra       = 1.0f;
-    private const float BowlDepthMultiplier   = 1.0f;
+    private const float BowlDepthMultiplier   = 0.5f;
     private const float BowlFalloffExponent   = 2f;
-    private const float SeamInset             = 0.04f;
-    private const float ShallowAboveKeep      = 0.35f;
-    private const float SeamSnapDepth         = 0.85f;
     private const float SeamProbeDepth        = 0.4f;
-    private const float MinCeilingThickness   = 1.0f;
     private const float RaiseRadiusMultiplier = 0.5f;
-    private const float WrittenSolidMin       = -0.99f;
 
     private const float PickaxeRadius           = 1.1f;
     private const float PickaxeNoiseFrequency   = 0.6f;
     private const float PickaxeNoiseAmplitude   = 0.35f;
-    private const float PickaxeHeightMultiplier = 1.5f;
+    private const float PickaxeHeightMultiplier = 1.0f;
 
     private const float SmoothRadius   = 3f;
     private const float SmoothPower    = 3f;
     private const float SmoothMaxStep  = 0.5f;
-    private const float SmoothMaxNeighbourStep = 1f;
     private const float LevelMaxStep   = 8f;
-    private const float CeilingNormalMaxY = -0.3f;
+    private const float SdfBias        = 0.05f;
+    private const float GroundOpNormalMinY = 0.5f;
 
     private const float ExtendedPunchBleed     = 2f;
     private const float OpenedCellPaintRadius  = 1f;
@@ -131,6 +123,7 @@ public partial class TerraformManager : MonoBehaviour {
                 entry.TerrainHeight   = unloaded.TerrainHeight;
                 entry.VoxelData       = unloaded.VoxelData;
                 entry.VoxelDataIsFull = true;
+                entry.AlteredBits     = unloaded.AlteredBits;
             }
             snapshot[kv.Key] = entry;
         }
@@ -141,9 +134,10 @@ public partial class TerraformManager : MonoBehaviour {
                 long chunkKey = ChunkKey(Mathf.RoundToInt(origin.x), Mathf.RoundToInt(origin.z));
                 if (!snapshot.TryGetValue(chunkKey, out var entry)) continue;
                 entry.TerrainHeight = data.TerrainHeight;
-                if (data.Chunk != null && data.Chunk.HasAnyNonDefault()) {
+                if (data.Chunk != null && data.Chunk.HasAnyAltered()) {
                     entry.VoxelData = data.Chunk.SerializeFull();
                     entry.VoxelDataIsFull = true;
+                    entry.AlteredBits = data.Chunk.SerializeAltered();
                 }
             }
         }
@@ -163,31 +157,15 @@ public partial class TerraformManager : MonoBehaviour {
         return false;
     }
 
-    public bool IsPlayerInVoxelCavity(Vector3 worldPos) {
-        var hm = Heightmap.FindHeightmap(worldPos);
-        if (hm == null) return false;
-        if (!Heightmap.GetHeight(worldPos, out float terrainY)) return false;
-        return IsPlayerInVoxelCavity(worldPos, hm, terrainY);
-    }
+    public bool IsPlayerInVoxelCavity(Vector3 worldPos) =>
+        IsInDugAir(worldPos) || IsInDugAir(worldPos + Vector3.up * UndergroundProbeUp);
 
     public bool ShouldSuppressUnderWorldCheck(Vector3 worldPos) {
-        var hm = Heightmap.FindHeightmap(worldPos);
-        if (hm == null) return false;
-
-        if (!Heightmap.GetHeight(worldPos, out float terrainY)) return false;
+        if (!OriginalHeight(worldPos, out float terrainY)) return false;
         if (worldPos.y >= terrainY - UndergroundEnterMarginY) return true;
-        return IsPlayerInVoxelCavity(worldPos, hm, terrainY);
-    }
-
-    private bool IsPlayerInVoxelCavity(Vector3 worldPos, Heightmap hm, float terrainY) {
-        if (worldPos.y >= terrainY - UndergroundEnterMarginY) return false;
-
-        if (_chunks.TryGetValue(hm.GetInstanceID(), out var data)
-            && data.Renderer != null
-            && data.Renderer.enabled)
-            return true;
-
-        return IsPositionInKnownDig(worldPos);
+        if (IsVoxelAir(worldPos)) return true;
+        bool chunkReady = TryGetChunkAt(worldPos, out var data) && data.Chunk != null;
+        return !chunkReady && IsPositionInKnownDig(worldPos);
     }
 
     private const float KnownDigXZSearchRadius = 4f;
@@ -229,6 +207,7 @@ public partial class TerraformManager : MonoBehaviour {
             _scanTimer = 0f;
             ScanHeightmaps();
         }
+        ReseedDirtyChunks();
         FlushNavDirty();
         UpdateWaterStreams();
         UpdateUndergroundCollision();

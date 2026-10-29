@@ -47,18 +47,24 @@ internal static class VoxelGroundProbe {
         float best    = 0f;
         float bestDist = float.MaxValue;
 
-        if (Heightmap.GetHeight(p, out float terrainY)) {
+        var manager = TerraformManager.Instance;
+        bool replaced = manager != null && manager.IsReplaced(p);
+        bool hasTerrain = Heightmap.GetHeight(p, out float terrainY);
+        if (hasTerrain && !replaced) {
             any = true; best = terrainY; bestDist = Mathf.Abs(terrainY - queryY);
         }
 
+        bool voxelFound = false;
         Vector3 origin = p; origin.y = p.y + GroundProbeUp;
         int n = Physics.RaycastNonAlloc(origin, Vector3.down, s_hits, 10000f, PieceMask);
         for (int i = 0; i < n; i++) {
             if (!IsVoxelHit(s_hits[i])) continue;
+            voxelFound = true;
             float d = Mathf.Abs(s_hits[i].point.y - queryY);
             if (d < bestDist) { bestDist = d; best = s_hits[i].point.y; any = true; }
         }
 
+        if (!any && hasTerrain && !voxelFound) { any = true; best = terrainY; }
         result = best;
         return any;
     }

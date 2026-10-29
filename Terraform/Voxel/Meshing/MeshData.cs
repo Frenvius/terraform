@@ -4,10 +4,12 @@ namespace Terraform.Voxel.Meshing;
 
 public class MeshData {
     public readonly List<Vertex3> Vertices = new();
+    public readonly List<bool>    OnTerrainSurface = new();
     public readonly List<int>     Indices  = new();
 
     public void Clear() {
         Vertices.Clear();
+        OnTerrainSurface.Clear();
         Indices.Clear();
     }
 }

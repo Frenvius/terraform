@@ -8,6 +8,16 @@ namespace Terraform.Patches;
 public static class HolePunchSystem {
     private static readonly Dictionary<int, HashSet<(int x, int y)>> _holes = new();
     private static readonly Dictionary<int, HashSet<(int x, int y)>> _collisionHoles = new();
+    private static readonly HashSet<int> _heightsDirty = new();
+
+    internal static void MarkHeightsDirty(Heightmap hm) => _heightsDirty.Add(hm.GetInstanceID());
+
+    internal static List<int> TakeHeightsDirty() {
+        if (_heightsDirty.Count == 0) return null;
+        var ids = new List<int>(_heightsDirty);
+        _heightsDirty.Clear();
+        return ids;
+    }
 
     public static void PunchHole(Heightmap hm, int cellX, int cellY, bool affectsCollision = true) {
         int id = hm.GetInstanceID();
@@ -19,6 +29,22 @@ public static class HolePunchSystem {
         if (!_collisionHoles.TryGetValue(id, out var colSet))
             _collisionHoles[id] = colSet = new HashSet<(int, int)>();
         colSet.Add((cellX, cellY));
+    }
+
+    public static void SetCell(Heightmap hm, int cellX, int cellY, bool replaced) {
+        if (replaced) {
+            PunchHole(hm, cellX, cellY);
+            return;
+        }
+        int id = hm.GetInstanceID();
+        if (_holes.TryGetValue(id, out var set)) set.Remove((cellX, cellY));
+        if (_collisionHoles.TryGetValue(id, out var colSet)) colSet.Remove((cellX, cellY));
+    }
+
+    public static void Clear(int heightmapId) {
+        _holes.Remove(heightmapId);
+        _collisionHoles.Remove(heightmapId);
+        _heightsDirty.Remove(heightmapId);
     }
 
     public static bool IsHole(Heightmap hm, int cellX, int cellY) {
@@ -110,6 +136,7 @@ public static class Heightmap_RebuildCollisionMesh_Patch {
 [HarmonyPatch(typeof(Heightmap), "RebuildRenderMesh")]
 public static class Heightmap_RebuildRenderMesh_Patch {
     static void Postfix(Heightmap __instance, Mesh ___m_renderMesh) {
+        HolePunchSystem.MarkHeightsDirty(__instance);
         if (!HolePunchSystem.TryGetHoles(__instance, out var holes)) return;
         HolePunchSystem.FilterHoleTriangles(__instance, ___m_renderMesh, holes);
     }

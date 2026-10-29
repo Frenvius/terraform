@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 using UnityEngine.AI;
+using Terraform.Voxel.Core;
 
 namespace Terraform.Patches;
 
@@ -473,7 +474,48 @@ public partial class TerraformManager {
         mat.SetInt("_ZWrite", 0);
         mat.SetInt("_Cull", (int)UnityEngine.Rendering.CullMode.Off);
         mr.material = mat;
+        AddReplacedCellMarks(go, hm, heights);
         return go;
+    }
+
+    private void AddReplacedCellMarks(GameObject grid, Heightmap hm, List<float> heights) {
+        if (!_chunks.TryGetValue(hm.GetInstanceID(), out var data) || data == null) return;
+
+        int width = hm.m_width + 1;
+        float half = hm.m_width * 0.5f;
+        float originY = hm.transform.position.y;
+        var verts = new List<Vector3>();
+        var indices = new List<int>();
+
+        for (int z = 0; z < hm.m_width; z++)
+        for (int x = 0; x < hm.m_width; x++) {
+            if (!data.CellReplaced[z * VoxelChunk.SIZE + x]) continue;
+            int start = verts.Count;
+            for (int dz = 0; dz <= 1; dz++)
+            for (int dx = 0; dx <= 1; dx++) {
+                float h = heights[(z + dz) * width + x + dx];
+                verts.Add(new Vector3((x + dx - half) * hm.m_scale, h - originY + 0.06f, (z + dz - half) * hm.m_scale));
+            }
+            indices.Add(start);     indices.Add(start + 3);
+            indices.Add(start + 1); indices.Add(start + 2);
+        }
+        if (verts.Count == 0) return;
+
+        var mesh = new Mesh { name = "TerraformDebugReplaced" };
+        mesh.SetVertices(verts);
+        mesh.SetIndices(indices, MeshTopology.Lines, 0);
+        mesh.RecalculateBounds();
+
+        var go = new GameObject("TerraformDebugReplaced");
+        go.transform.SetParent(grid.transform, false);
+        go.AddComponent<MeshFilter>().mesh = mesh;
+        var shader = Shader.Find("Hidden/Internal-Colored")
+                  ?? Shader.Find("Sprites/Default")
+                  ?? Shader.Find("Unlit/Color");
+        var mat = new Material(shader) { color = new Color(1f, 0.5f, 0.1f, 1f) };
+        mat.SetInt("_ZWrite", 0);
+        mat.SetInt("_Cull", (int)UnityEngine.Rendering.CullMode.Off);
+        go.AddComponent<MeshRenderer>().material = mat;
     }
 
     private void RefreshDebugChunkWalls() {

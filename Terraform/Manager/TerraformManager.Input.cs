@@ -88,6 +88,9 @@ public partial class TerraformManager {
         return !Location.IsInsideNoBuildLocation(worldPos);
     }
 
+    private const float RaiseLiftMaxRise   = 4f;
+    private const float RaiseLiftClearance = 0.05f;
+
     public bool PerformRaiseAt(Vector3 worldPos) {
         return PerformRaiseAt(worldPos, Vector3.up);
     }
@@ -105,15 +108,27 @@ public partial class TerraformManager {
         var hm = Heightmap.FindHeightmap(worldPos);
         if (hm == null) return false;
 
-        DeriveModePunchParams(DigMode.Raise, radius, out float punchRadius, out float maxRaiseHeight);
-
-        PunchHoles(hm, worldPos, punchRadius, maxRaiseHeight, affectsCollision: false);
         Dig(new DigRecord {
             WorldPos = worldPos, Normal = surfaceNormal.normalized, Radius = radius, Mode = DigMode.Raise, Height = height
         });
+        LiftCharactersOutOfRaise(worldPos, radius * OuterRadiusMultiplier);
 
         if (_showDebugGrid) { RefreshDebugGrids(); RefreshDebugChunkWalls(); }
         return true;
+    }
+
+    private void LiftCharactersOutOfRaise(Vector3 center, float footprintRadius) {
+        foreach (var character in Character.GetAllCharacters()) {
+            if (character == null) continue;
+            Vector3 feet = character.transform.position;
+            if (HorizontalDistance(feet, center) > footprintRadius + character.GetRadius()) continue;
+            if (!TryFindAirAbove(feet, RaiseLiftMaxRise, out float airY)) continue;
+
+            Vector3 lifted = new Vector3(feet.x, airY + RaiseLiftClearance, feet.z);
+            character.transform.position = lifted;
+            var body = character.GetComponent<Rigidbody>();
+            if (body != null) body.position = lifted;
+        }
     }
 
     public bool PerformDigAt(Vector3 worldPos) {
@@ -131,28 +146,18 @@ public partial class TerraformManager {
 
         float radius = Configs.ModConfig.BrushSize.Value;
 
-        Heightmap.GetHeight(worldPos, out float terrainY);
-        bool belowTerrain          = worldPos.y < terrainY - 0.5f;
-        bool overlapsExistingHole  = DigIntersectsExistingSurfaceHole(worldPos, radius);
+        OriginalHeight(worldPos, out float terrainY);
+        float surfaceY = SurfaceHeight(worldPos, terrainY);
         DigMode mode;
-        if (overlapsExistingHole) mode = DigMode.OpenHoleDeepen;
-        else if (belowTerrain)    mode = DigMode.UndergroundTunnel;
-        else                       mode = DigMode.Surface;
+        if (DigTouchesCrater(worldPos, radius))          mode = DigMode.OpenHoleDeepen;
+        else if (worldPos.y < surfaceY - CraterMinDepth) mode = DigMode.UndergroundTunnel;
+        else                                             mode = DigMode.Surface;
 
         Vector3 digPos = worldPos;
         if (mode == DigMode.Surface && hitCollider != null && hitCollider.gameObject.layer == LayerMask.NameToLayer("piece")) {
-            digPos.y = terrainY;
+            digPos.y = surfaceY;
         }
 
-        if (mode == DigMode.Surface) {
-            float surfaceOuterRadius = radius * OuterRadiusMultiplier;
-            float surfacePunchRadius = surfaceOuterRadius + ExtendedPunchBleed;
-            PunchHoles(hm, digPos, surfacePunchRadius, SurfacePunchMaxDelta(radius));
-        } else {
-            float pickaxeOuterRadius = PickaxeRadius + PickaxeNoiseAmplitude;
-            float pickaxeReachY      = pickaxeOuterRadius * PickaxeHeightMultiplier;
-            PunchHoles(hm, digPos, pickaxeOuterRadius, pickaxeReachY);
-        }
         Dig(digPos, radius, mode);
 
         if (_showDebugGrid) { RefreshDebugGrids(); RefreshDebugChunkWalls(); }

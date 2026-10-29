@@ -193,7 +193,7 @@ public partial class TerraformManager {
 
         y = float.NaN;
         if (Heightmap.GetHeight(cellCenter, out float terrainY)) {
-            var origin = new Vector3(cellCenter.x, terrainY + RimLinkFloorProbeUp, cellCenter.z);
+            var origin = new Vector3(cellCenter.x, SurfaceHeight(cellCenter, terrainY) + RimLinkFloorProbeUp, cellCenter.z);
             if (Physics.Raycast(origin, Vector3.down, out var hit, RimLinkFloorProbe, blockMask, QueryTriggerInteraction.Ignore)
                 && VoxelGroundProbe.IsVoxelHit(hit) && hit.normal.y > RimLinkMinFloorNormalY)
                 y = hit.point.y;

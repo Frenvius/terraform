@@ -75,7 +75,7 @@ public partial class TerraformManager {
             if (!_chunkDigHistory.TryGetValue(chunkKey, out var digs)) continue;
             foreach (var dig in digs) {
                 if (dig.Mode != DigMode.UndergroundTunnel && dig.Mode != DigMode.OpenHoleDeepen) continue;
-                if (!Heightmap.GetHeight(dig.WorldPos, out float terrainY) || terrainY >= waterY) continue;
+                if (!OriginalHeight(dig.WorldPos, out float terrainY) || terrainY >= waterY) continue;
                 if (Mathf.Abs(dig.WorldPos.y - terrainY) > pickaxeReach) continue;
                 _leakOpenings.Add(new Vector3(dig.WorldPos.x, terrainY, dig.WorldPos.z));
             }

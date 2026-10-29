@@ -6,6 +6,8 @@ public partial class TerraformManager {
     private static bool _materialDumped;
     private static MaterialPropertyBlock _terrainRendererProperties;
     private static readonly int ClearedMaskTexId = Shader.PropertyToID("_ClearedMaskTex");
+    private static readonly int WaterLevelId = Shader.PropertyToID("_WaterLevel");
+    private const float DryWaterLevel = -10000f;
 
     private static void DumpMaterialOnce(Heightmap hm) {
         if (_materialDumped) return;
@@ -77,9 +79,12 @@ public partial class TerraformManager {
 
         _terrainRendererProperties ??= new MaterialPropertyBlock();
         terrainRenderer.GetPropertyBlock(_terrainRendererProperties);
+        _terrainRendererProperties.SetFloat(WaterLevelId, DryWaterLevel);
         data.Renderer.SetPropertyBlock(_terrainRendererProperties, SurfaceSubmesh);
-        _terrainRendererProperties.SetTexture(ClearedMaskTexId, UndergroundDirtMask);
-        data.Renderer.SetPropertyBlock(_terrainRendererProperties, UndergroundSubmesh);
+        if (data.UndergroundMask != null) {
+            _terrainRendererProperties.SetTexture(ClearedMaskTexId, data.UndergroundMask);
+            data.Renderer.SetPropertyBlock(_terrainRendererProperties, UndergroundSubmesh);
+        }
         for (int i = 0; i < data.SubmeshPaintBands.Count; i++) {
             if (!data.PaintBandMasks.TryGetValue(data.SubmeshPaintBands[i], out var mask)) continue;
             _terrainRendererProperties.SetTexture(ClearedMaskTexId, mask);
