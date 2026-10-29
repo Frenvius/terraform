@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using Terraform.Persistence;
 using Terraform.Voxel.Core;
 
 namespace Terraform.Patches;
@@ -18,7 +19,10 @@ public partial class TerraformManager {
                 var d = _chunks[k];
                 if (d?.MeshObject != null) Destroy(d.MeshObject);
                 if (d?.Mesh       != null) Destroy(d.Mesh);
-                if (d != null) DestroyPaintBandMasks(d);
+                if (d != null) {
+                    DestroyPaintBandMasks(d);
+                    if (!_pendingBuildHash.ContainsKey(k)) RetainUnloadedChunkSdf(d);
+                }
                 _chunks.Remove(k);
                 _pendingBuildHash.Remove(k);
                 _pendingBuildSince.Remove(k);
@@ -83,6 +87,7 @@ public partial class TerraformManager {
             long lookupKey = ChunkKey(
                 Mathf.RoundToInt(hm.transform.position.x - halfA),
                 Mathf.RoundToInt(hm.transform.position.z - halfA));
+            data.ChunkKey = lookupKey;
             bool usedSavedTerrainHeight = false;
             if (_pendingPersistence != null && _pendingPersistence.TryGetValue(lookupKey, out var savedEntry)
                 && savedEntry != null && savedEntry.TerrainHeight != 0f) {
@@ -214,6 +219,15 @@ public partial class TerraformManager {
         return h;
     }
 
+    private void RetainUnloadedChunkSdf(ChunkRenderData data) {
+        if (data.Chunk == null || !data.Chunk.HasAnyNonDefault()) return;
+        _pendingPersistence[data.ChunkKey] = new ChunkPersistence {
+            TerrainHeight   = data.TerrainHeight,
+            VoxelData       = data.Chunk.SerializeFull(),
+            VoxelDataIsFull = true,
+        };
+    }
+
     private static void ResetChunkDigState(ChunkRenderData data) {
         data.Chunk = new VoxelChunk();
         data.RenderFootprints.Clear();
@@ -251,6 +265,13 @@ public partial class TerraformManager {
                 replayed++;
             }
             DebugLog($"  replayed {replayed} digs onto new chunk");
+        }
+
+        int shaped = PunchCellsShapedBySurfaceMoves(data, digs);
+        if (shaped > 0) {
+            data.Heightmap.Poke();
+            ClutterSystem.instance?.ResetGrass(origin + new Vector3(VoxelChunk.SIZE * 0.5f, 0f, VoxelChunk.SIZE * 0.5f), VoxelChunk.SIZE);
+            DebugLog($"  shape-punched {shaped} cells from surface moves");
         }
 
         RebuildMesh(data);

@@ -36,6 +36,7 @@ public partial class TerraformManager : MonoBehaviour {
     private const float SeamProbeDepth        = 0.4f;
     private const float MinCeilingThickness   = 1.0f;
     private const float RaiseRadiusMultiplier = 0.5f;
+    private const float WrittenSolidMin       = -0.99f;
 
     private const float PickaxeRadius           = 1.1f;
     private const float PickaxeNoiseFrequency   = 0.6f;
@@ -45,6 +46,7 @@ public partial class TerraformManager : MonoBehaviour {
     private const float SmoothRadius   = 3f;
     private const float SmoothPower    = 3f;
     private const float SmoothMaxStep  = 0.5f;
+    private const float SmoothMaxNeighbourStep = 1f;
     private const float LevelMaxStep   = 8f;
     private const float CeilingNormalMaxY = -0.3f;
 
@@ -125,6 +127,11 @@ public partial class TerraformManager : MonoBehaviour {
         foreach (var kv in _chunkDigHistory) {
             var entry = new ChunkPersistence { Digs = new List<DigRecord>(kv.Value) };
             _undergroundPaved.TryGetValue(kv.Key, out entry.UndergroundPaved);
+            if (_pendingPersistence.TryGetValue(kv.Key, out var unloaded) && unloaded.VoxelDataIsFull) {
+                entry.TerrainHeight   = unloaded.TerrainHeight;
+                entry.VoxelData       = unloaded.VoxelData;
+                entry.VoxelDataIsFull = true;
+            }
             snapshot[kv.Key] = entry;
         }
         if (_chunks != null) {

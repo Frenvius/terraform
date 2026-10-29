@@ -156,12 +156,17 @@ public partial class TerraformManager {
         data.PaintBandMasks.Clear();
     }
 
+    private static bool IsUntouchedVoxel(float value) => value <= Terraform.Voxel.Core.Voxel.Solid.Value + 1e-4f;
+
     private static float OpenSkyFloorLocalY(ChunkRenderData data, List<float> heights, Vector3 origin, int cellX, int cellZ) {
         float localX = cellX + 0.5f;
         float localZ = cellZ + 0.5f;
-        float terrainY = SampleHeightmapMeshYCached(
-            data.Heightmap, heights, new Vector3(origin.x + localX, 0f, origin.z + localZ), data.TerrainHeight);
-        float y = Mathf.Min(terrainY - origin.y, VoxelChunk.SIZE) - SeamProbeDepth;
+        float y = VoxelChunk.SIZE;
+        if (IsUntouchedVoxel(SampleSdfTri(data.Chunk, localX, y, localZ))) {
+            float terrainY = SampleHeightmapMeshYCached(
+                data.Heightmap, heights, new Vector3(origin.x + localX, 0f, origin.z + localZ), data.TerrainHeight);
+            y = Mathf.Min(terrainY - origin.y, VoxelChunk.SIZE) - SeamProbeDepth;
+        }
         while (y > 0f && SampleSdfTri(data.Chunk, localX, y, localZ) > 0f) y -= OpenColumnScanStep;
         return y;
     }

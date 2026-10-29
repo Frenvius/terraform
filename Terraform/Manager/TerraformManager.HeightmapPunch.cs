@@ -5,7 +5,32 @@ using Terraform.Voxel.Core;
 namespace Terraform.Patches;
 
 public partial class TerraformManager {
+    private delegate bool CellVoxelTest(ChunkRenderData data, List<float> heights, Vector3 origin, int wcX, int wcZ);
+
     private int RefinePunchFromVoxel(ChunkRenderData data, int wcMinX, int wcMaxX, int wcMinZ, int wcMaxZ) {
+        var area = new RenderFootprint { MinX = wcMinX, MaxX = wcMaxX + 1, MinZ = wcMinZ, MaxZ = wcMaxZ + 1 };
+        return PunchCellsWhere(data, area, CellGroundRemovedByVoxel, affectsCollision: true);
+    }
+
+    private static bool MovesSurface(DigMode mode) => mode == DigMode.Smooth || mode == DigMode.Level;
+
+    private static RenderFootprint SurfaceMoveArea(DigRecord dig) => new RenderFootprint {
+        MinX = Mathf.FloorToInt(dig.WorldPos.x - dig.Radius), MaxX = Mathf.FloorToInt(dig.WorldPos.x + dig.Radius) + 1,
+        MinZ = Mathf.FloorToInt(dig.WorldPos.z - dig.Radius), MaxZ = Mathf.FloorToInt(dig.WorldPos.z + dig.Radius) + 1,
+    };
+
+    private int PunchCellsShapedByVoxel(ChunkRenderData data, RenderFootprint area) =>
+        PunchCellsWhere(data, area, CellGroundRemovedByVoxel, affectsCollision: true)
+        + PunchCellsWhere(data, area, CellGroundRaisedByVoxel, affectsCollision: false);
+
+    private int PunchCellsShapedBySurfaceMoves(ChunkRenderData data, List<DigRecord> digs) {
+        int punched = 0;
+        foreach (var dig in digs)
+            if (MovesSurface(dig.Mode)) punched += PunchCellsShapedByVoxel(data, SurfaceMoveArea(dig));
+        return punched;
+    }
+
+    private int PunchCellsWhere(ChunkRenderData data, RenderFootprint area, CellVoxelTest test, bool affectsCollision) {
         var hm = data.Heightmap;
         if (hm == null || hm.gameObject.name.Contains("lodMesh")) return 0;
 
@@ -18,17 +43,39 @@ public partial class TerraformManager {
         var heights = GetHeightsArray(hm);
 
         int punched = 0;
-        for (int wcZ = wcMinZ; wcZ <= wcMaxZ; wcZ++)
-        for (int wcX = wcMinX; wcX <= wcMaxX; wcX++) {
+        for (int wcZ = area.MinZ; wcZ < area.MaxZ; wcZ++)
+        for (int wcX = area.MinX; wcX < area.MaxX; wcX++) {
             int hx = Mathf.FloorToInt((wcX - hmCellOriginX) * invScale);
             int hz = Mathf.FloorToInt((wcZ - hmCellOriginZ) * invScale);
             if (hx < 0 || hz < 0 || hx >= hm.m_width || hz >= hm.m_width) continue;
-            if (HolePunchSystem.IsHole(hm, hx, hz)) continue;
-            if (!CellGroundRemovedByVoxel(data, heights, origin, wcX, wcZ)) continue;
-            HolePunchSystem.PunchHole(hm, hx, hz, affectsCollision: true);
+            bool alreadyPunched = affectsCollision
+                ? HolePunchSystem.IsCollisionHole(hm, hx, hz)
+                : HolePunchSystem.IsHole(hm, hx, hz);
+            if (alreadyPunched) continue;
+            if (!test(data, heights, origin, wcX, wcZ)) continue;
+            HolePunchSystem.PunchHole(hm, hx, hz, affectsCollision);
             punched++;
         }
         return punched;
+    }
+
+    private static bool CellGroundRaisedByVoxel(
+        ChunkRenderData data, List<float> heights, Vector3 origin, int wcX, int wcZ) {
+        for (int dz = 0; dz <= 2; dz++)
+        for (int dx = 0; dx <= 2; dx++) {
+            if (dx == 1 != (dz == 1)) continue;
+            float wx = wcX + dx * 0.5f;
+            float wz = wcZ + dz * 0.5f;
+            float localX = wx - origin.x;
+            float localZ = wz - origin.z;
+            if (localX < 0f || localX > VoxelChunk.SIZE || localZ < 0f || localZ > VoxelChunk.SIZE) continue;
+
+            float terrainY = SampleHeightmapMeshYCached(data.Heightmap, heights, new Vector3(wx, 0f, wz), data.TerrainHeight);
+            float localY = terrainY - origin.y + ShallowAboveKeep;
+            if (localY < 0f || localY > VoxelChunk.SIZE) continue;
+            if (SampleSdfTri(data.Chunk, localX, localY, localZ) < 0f) return true;
+        }
+        return false;
     }
 
     private static bool CellGroundRemovedByVoxel(

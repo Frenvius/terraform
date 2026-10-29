@@ -17,5 +17,6 @@ public class ChunkRenderData {
     public readonly Dictionary<int, Texture2D> PaintBandMasks = new();
     public readonly List<int> SubmeshPaintBands = new();
     public float TerrainHeight;
+    public long ChunkKey;
     public readonly List<RenderFootprint> RenderFootprints = new();
 }

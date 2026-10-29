@@ -79,6 +79,14 @@ public partial class TerraformManager {
                     }
                     if (VerboseLogs) DebugLog($"[refine-punch] hm={data.Heightmap.gameObject.name} added={refined}");
                 }
+            } else if (MovesSurface(mode)) {
+                SyncHeightmapToVoxelSurface(data, record);
+                int shaped = PunchCellsShapedByVoxel(data, SurfaceMoveArea(record));
+                if (shaped > 0) {
+                    data.Heightmap.Poke();
+                    ClutterSystem.instance?.ResetGrass(worldPos, radius * Mathf.Sqrt(2f) + 0.5f);
+                    if (VerboseLogs) DebugLog($"[shape-punch] hm={data.Heightmap.gameObject.name} added={shaped}");
+                }
             }
 
             var swMesh = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
@@ -112,7 +120,6 @@ public partial class TerraformManager {
 
     private void CarveCrater(ChunkRenderData data, DigRecord dig) {
         data.Chunk ??= new VoxelChunk();
-        RefreshPieceMask(dig.WorldPos, dig.Radius * OuterRadiusMultiplier + ExtendedPunchBleed + 1f);
 
         switch (dig.Mode) {
             case DigMode.Surface:
@@ -129,8 +136,6 @@ public partial class TerraformManager {
                 CarvePickaxeSphere(data, dig.WorldPos);
                 break;
         }
-
-        SubtractPieces(data);
     }
 
     private void CarveSurfaceCrater(ChunkRenderData data, Vector3 worldPos, float radius) {
@@ -346,6 +351,19 @@ public partial class TerraformManager {
 
     private static bool IsCeilingNormal(Vector3 normal) => normal.y < CeilingNormalMaxY;
 
+    private static RenderFootprint SurfaceMoveColumns(DigRecord dig) => new RenderFootprint {
+        MinX = Mathf.FloorToInt(dig.WorldPos.x - dig.Radius) - 1, MaxX = Mathf.CeilToInt(dig.WorldPos.x + dig.Radius) + 1,
+        MinZ = Mathf.FloorToInt(dig.WorldPos.z - dig.Radius) - 1, MaxZ = Mathf.CeilToInt(dig.WorldPos.z + dig.Radius) + 1,
+    };
+
+    private static ColumnSurfaceQuery SurfaceQueryFor(DigRecord dig, int chunkOriginY) => new ColumnSurfaceQuery {
+        YFloor    = ProtectedYLocalExclusive(chunkOriginY),
+        OriginY   = chunkOriginY,
+        TargetY   = dig.WorldPos.y,
+        FacesDown = IsCeilingNormal(dig.Normal),
+        Reach     = FalloffFor(dig) == SurfaceFalloff.SmoothCircle ? dig.Radius : LevelMaxStep,
+    };
+
     private void MoveSurfaceTowardPlane(ChunkRenderData data, DigRecord dig) {
         Vector3 worldPos       = dig.WorldPos;
         float radius           = dig.Radius;
@@ -356,7 +374,6 @@ public partial class TerraformManager {
         int chunkOriginX = Mathf.RoundToInt(origin.x);
         int chunkOriginY = Mathf.RoundToInt(origin.y);
         int chunkOriginZ = Mathf.RoundToInt(origin.z);
-        int yFloor       = ProtectedYLocalExclusive(chunkOriginY);
         float targetY    = worldPos.y;
 
         int worldCellMinX = Mathf.FloorToInt(worldPos.x - radius);
@@ -367,19 +384,12 @@ public partial class TerraformManager {
         SeedHeightmapSdfApron(data, chunkOriginX, chunkOriginY, chunkOriginZ,
             worldCellMinX, worldCellMaxX, worldCellMinZ, worldCellMaxZ);
 
-        int worldVxMin = Mathf.FloorToInt(worldPos.x - radius) - 1;
-        int worldVxMax = Mathf.CeilToInt (worldPos.x + radius) + 1;
-        int worldVzMin = Mathf.FloorToInt(worldPos.z - radius) - 1;
-        int worldVzMax = Mathf.CeilToInt (worldPos.z + radius) + 1;
-
-        var query = new ColumnSurfaceQuery {
-            YFloor = yFloor, OriginY = chunkOriginY, TargetY = targetY, FacesDown = facesDown,
-            Reach = falloff == SurfaceFalloff.SmoothCircle ? radius : LevelMaxStep,
-        };
+        var columns = SurfaceMoveColumns(dig);
+        var query   = SurfaceQueryFor(dig, chunkOriginY);
         int writes = 0, columnsTouched = 0, columnsNoSurface = 0;
 
-        for (int worldVz = worldVzMin; worldVz <= worldVzMax; worldVz++)
-        for (int worldVx = worldVxMin; worldVx <= worldVxMax; worldVx++) {
+        for (int worldVz = columns.MinZ; worldVz <= columns.MaxZ; worldVz++)
+        for (int worldVx = columns.MinX; worldVx <= columns.MaxX; worldVx++) {
             int vx = worldVx - chunkOriginX;
             int vz = worldVz - chunkOriginZ;
             if (vx < 0 || vx > VoxelChunk.SIZE || vz < 0 || vz > VoxelChunk.SIZE) continue;
@@ -394,6 +404,8 @@ public partial class TerraformManager {
             if (deltaY >  maxStep) deltaY =  maxStep;
             if (deltaY < -maxStep) deltaY = -maxStep;
             float newSurfaceY = surfaceY + deltaY;
+            if (falloff == SurfaceFalloff.SmoothCircle && surface.OpenToSky)
+                newSurfaceY = LimitStepToOpenSkyNeighbours(data.Chunk, vx, vz, query, surfaceY, newSurfaceY);
 
             int bandLoWorld = Mathf.FloorToInt(Mathf.Min(surfaceY, newSurfaceY)) - 2;
             int bandHiWorld = Mathf.CeilToInt (Mathf.Max(surfaceY, newSurfaceY)) + 2;
@@ -405,12 +417,12 @@ public partial class TerraformManager {
             for (int yLocal = bandLo; yLocal <= bandHi; yLocal++) {
                 int worldY = chunkOriginY + yLocal;
                 float planeSdf = facesDown ? newSurfaceY - worldY : worldY - newSurfaceY;
-                if (planeSdf < -1f) planeSdf = -1f;
+                if (planeSdf < WrittenSolidMin) planeSdf = WrittenSolidMin;
                 else if (planeSdf > 1f) planeSdf = 1f;
 
                 var v = data.Chunk.Get(vx, yLocal, vz);
                 float newVal = Mathf.Lerp(v.Value, planeSdf, weight);
-                if (newVal < -1f) newVal = -1f;
+                if (newVal < WrittenSolidMin) newVal = WrittenSolidMin;
                 else if (newVal > 1f) newVal = 1f;
                 if (newVal == 0f) newVal = 0.001f;
                 if (Mathf.Abs(newVal - v.Value) < 1e-4f) continue;
@@ -429,6 +441,28 @@ public partial class TerraformManager {
         }
     }
 
+    private static readonly (int x, int z)[] ColumnNeighbours = { (1, 0), (-1, 0), (0, 1), (0, -1) };
+
+    private static float LimitStepToOpenSkyNeighbours(
+        VoxelChunk chunk, int vx, int vz, ColumnSurfaceQuery query, float surfaceY, float newSurfaceY) {
+        var anyReach = query;
+        anyReach.Reach = float.PositiveInfinity;
+        bool onSeamX = vx == 0 || vx == VoxelChunk.SIZE;
+        bool onSeamZ = vz == 0 || vz == VoxelChunk.SIZE;
+        float lowest = float.PositiveInfinity, highest = float.NegativeInfinity;
+
+        foreach (var (dx, dz) in ColumnNeighbours) {
+            if (dx != 0 && onSeamX || dz != 0 && onSeamZ) continue;
+            if (!TryFindColumnSurface(chunk, vx + dx, vz + dz, anyReach, out var neighbour) || !neighbour.OpenToSky) continue;
+            lowest  = Mathf.Min(lowest, neighbour.WorldY);
+            highest = Mathf.Max(highest, neighbour.WorldY);
+        }
+
+        if (newSurfaceY < surfaceY)
+            return Mathf.Max(newSurfaceY, Mathf.Min(surfaceY, highest - SmoothMaxNeighbourStep));
+        return Mathf.Min(newSurfaceY, Mathf.Max(surfaceY, lowest + SmoothMaxNeighbourStep));
+    }
+
     private struct ColumnSurfaceQuery {
         public int YFloor;
         public int OriginY;
@@ -441,6 +475,7 @@ public partial class TerraformManager {
         public float WorldY;
         public int WriteLo;
         public int WriteHi;
+        public bool OpenToSky;
     }
 
     private static bool TryFindColumnSurface(VoxelChunk chunk, int vx, int vz, ColumnSurfaceQuery query, out ColumnSurface best) {
@@ -466,9 +501,10 @@ public partial class TerraformManager {
 
             bestDist = dist;
             best = new ColumnSurface {
-                WorldY  = surfaceY,
-                WriteLo = runLo > query.YFloor ? Mathf.Min(y, runLo + 1) : runLo,
-                WriteHi = runHi < VoxelChunk.SIZE ? Mathf.Max(y + 1, runHi - 1) : runHi,
+                WorldY    = surfaceY,
+                WriteLo   = runLo > query.YFloor ? Mathf.Min(y, runLo + 1) : runLo,
+                WriteHi   = runHi < VoxelChunk.SIZE ? Mathf.Max(y + 1, runHi - 1) : runHi,
+                OpenToSky = !query.FacesDown && runHi == VoxelChunk.SIZE,
             };
         }
         return bestDist < float.MaxValue;
@@ -638,7 +674,7 @@ public partial class TerraformManager {
                         : EllipsoidMoundDistance(delta);
                     if (shapeDistance >= 1f) continue;
 
-                    float sdf = Mathf.Clamp(shapeDistance + 0.05f, -0.99f, 1f);
+                    float sdf = Mathf.Clamp(shapeDistance + 0.05f, WrittenSolidMin, 1f);
 
                     var v = data.Chunk.Get(vx, yLocal, vz);
                     bool isAtDefault = v.Value <= -1f + 1e-5f;

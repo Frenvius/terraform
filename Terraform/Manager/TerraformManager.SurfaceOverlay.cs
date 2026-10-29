@@ -45,13 +45,26 @@ public partial class TerraformManager {
     private enum CellState { Outside, Intact, Punched }
 
     private static CellState ClassifyPoint(Heightmap hm, Vector3 worldPos) {
-        Heightmap target = hm;
-        if (!TryWorldToHeightmapCell(target, worldPos, out int x, out int z)) {
-            target = Heightmap.FindHeightmap(worldPos);
-            if (target == null || target.gameObject.name.Contains("lodMesh")) return CellState.Outside;
-            if (!TryWorldToHeightmapCell(target, worldPos, out x, out z)) return CellState.Outside;
-        }
+        if (!TryResolveCell(hm, worldPos, out var target, out int x, out int z)) return CellState.Outside;
         return HolePunchSystem.IsHole(target, x, z) ? CellState.Punched : CellState.Intact;
+    }
+
+    private static bool TryResolveCell(Heightmap hm, Vector3 worldPos, out Heightmap target, out int x, out int z) {
+        target = hm;
+        if (TryWorldToHeightmapCell(target, worldPos, out x, out z)) return true;
+        target = Heightmap.FindHeightmap(worldPos);
+        if (target == null || target.gameObject.name.Contains("lodMesh")) return false;
+        return TryWorldToHeightmapCell(target, worldPos, out x, out z);
+    }
+
+    private static bool IsVertexInsideCollisionHoles(Heightmap hm, int worldVx, int worldVz) {
+        for (int dz = -1; dz <= 0; dz++)
+        for (int dx = -1; dx <= 0; dx++) {
+            var cellCentre = new Vector3(worldVx + dx + 0.5f, 0f, worldVz + dz + 0.5f);
+            if (!TryResolveCell(hm, cellCentre, out var target, out int x, out int z)) return false;
+            if (!HolePunchSystem.IsCollisionHole(target, x, z)) return false;
+        }
+        return true;
     }
 
     private static CellState ClassifyVertexCells(
