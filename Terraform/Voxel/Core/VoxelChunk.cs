@@ -8,6 +8,7 @@ public class VoxelChunk {
 
     private readonly Voxel[] _voxels;
     private readonly ulong[] _altered;
+    private float _solidRemoved;
 
     public VoxelChunk() {
         _voxels = new Voxel[TOTAL];
@@ -33,8 +34,17 @@ public class VoxelChunk {
         if (System.Math.Abs(value - old) <= AlteredEpsilon) return false;
         _voxels[i].Value = value;
         SetBit(i);
+        if (x < SIZE && z < SIZE) _solidRemoved += Solidity(old) - Solidity(value);
         return true;
     }
+
+    public float TakeSolidRemoved() {
+        float removed = _solidRemoved;
+        _solidRemoved = 0f;
+        return removed;
+    }
+
+    private static float Solidity(float value) => System.Math.Max(0f, System.Math.Min(1f, 0.5f - 0.5f * value));
 
     public void SetIntact(int x, int y, int z, float value) {
         if (OutOfBounds(x, y, z)) return;

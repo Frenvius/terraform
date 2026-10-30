@@ -145,6 +145,8 @@
     <Compile Include="Manager\TerraformManager.TerrainOps.cs" />
     <Compile Include="Manager\TerraformManager.UndergroundPaint.cs" />
     <Compile Include="Manager\TerraformManager.Dig.cs" />
+    <Compile Include="Manager\TerraformManager.StoneYield.cs" />
+    <Compile Include="Digging\StoneYield.cs" />
     <Compile Include="Manager\TerraformManager.HeightmapPunch.cs" />
     <Compile Include="Manager\TerraformManager.CellOwnership.cs" />
     <Compile Include="Manager\TerraformManager.TerrainQuery.cs" />

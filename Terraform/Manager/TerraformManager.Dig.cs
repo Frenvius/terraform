@@ -39,6 +39,7 @@ public partial class TerraformManager {
         var swTotal = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
         int chunkHit = 0;
         long carveTicks = 0, meshTicks = 0;
+        float solidRemoved = 0f;
         foreach (var kv in _chunks) {
             var data = kv.Value;
             if (data == null || data.MeshObject == null || data.Heightmap == null) continue;
@@ -57,7 +58,10 @@ public partial class TerraformManager {
 
             chunkHit++;
             var swCarve = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
+            EnsureChunkAllocated(data);
+            data.Chunk.TakeSolidRemoved();
             CarveCrater(data, record);
+            solidRemoved += data.Chunk.TakeSolidRemoved();
             if (swCarve != null) carveTicks += swCarve.ElapsedTicks;
 
             RefreshCellOwnership(data, CellRectForDig(data, record));
@@ -89,6 +93,7 @@ public partial class TerraformManager {
         RefreshWaterLeaks();
 
         if (chunkHit > 0) {
+            SettleStone(record, solidRemoved);
             float reach = radius * OuterRadiusMultiplier + ExtendedPunchBleed;
             MarkNavDirty(worldPos.x - reach, worldPos.z - reach, worldPos.x + reach, worldPos.z + reach);
         }

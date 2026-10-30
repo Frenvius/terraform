@@ -11,5 +11,9 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="..\Water\BucketWaterMath.cs" Link="Linked\Water\BucketWaterMath.cs" />
+    <Compile Include="..\Digging\StoneYield.cs" Link="Linked\Digging\StoneYield.cs" />
+    <Compile Include="..\Patches\Types\DigMode.cs" Link="Linked\Patches\Types\DigMode.cs" />
+    <Compile Include="..\Voxel\Core\Voxel.cs" Link="Linked\Voxel\Core\Voxel.cs" />
+    <Compile Include="..\Voxel\Core\VoxelChunk.cs" Link="Linked\Voxel\Core\VoxelChunk.cs" />
   </ItemGroup>
 </Project>
