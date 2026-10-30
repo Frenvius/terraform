@@ -41,6 +41,45 @@ public static class CustomItems {
             if (!target.Contains(prefab)) target.Add(prefab);
     }
 
+    public static void AddWaterBucketRecipe(ObjectDB db) {
+        const string recipeName = "Recipe_" + WaterBucket.ItemName;
+        if (db.m_recipes.Exists(recipe => recipe != null && recipe.name == recipeName)) return;
+
+        var bucket = FindItem(db, WaterBucket.ItemName);
+        if (bucket == null) return;
+        var fineWood = FindItem(db, "FineWood");
+        var tin      = FindItem(db, "Tin");
+        var forge    = FindStation(db, "forge");
+        if (fineWood == null || tin == null || forge == null) {
+            TerraformPlugin.Log.LogError($"[items] water bucket recipe skipped: FineWood={fineWood != null} Tin={tin != null} forge={forge != null}");
+            return;
+        }
+
+        var recipe = ScriptableObject.CreateInstance<Recipe>();
+        recipe.name = recipeName;
+        recipe.m_item = bucket;
+        recipe.m_craftingStation = forge;
+        recipe.m_repairStation = forge;
+        recipe.m_minStationLevel = 1;
+        recipe.m_resources = new[] {
+            new Piece.Requirement { m_resItem = fineWood, m_amount = 6, m_amountPerLevel = 0 },
+            new Piece.Requirement { m_resItem = tin,      m_amount = 2, m_amountPerLevel = 0 },
+        };
+        db.m_recipes.Add(recipe);
+    }
+
+    private static ItemDrop FindItem(ObjectDB db, string name) {
+        var prefab = db.m_items.Find(item => item != null && item.name == name);
+        return prefab != null ? prefab.GetComponent<ItemDrop>() : null;
+    }
+
+    private static CraftingStation FindStation(ObjectDB db, string name) {
+        foreach (var recipe in db.m_recipes)
+            if (recipe != null && recipe.m_craftingStation != null && recipe.m_craftingStation.name == name)
+                return recipe.m_craftingStation;
+        return null;
+    }
+
     public static void ResolveMockMaterials() {
         if (_mocksResolved) return;
         _mocksResolved = true;
@@ -74,5 +113,8 @@ public static class ZNetScene_Awake_RegisterItems_Patch {
 
 [HarmonyPatch(typeof(ObjectDB), "Awake")]
 public static class ObjectDB_Awake_RegisterItems_Patch {
-    static void Prefix(ObjectDB __instance) => CustomItems.AddMissing(__instance.m_items);
+    static void Prefix(ObjectDB __instance) {
+        CustomItems.AddMissing(__instance.m_items);
+        CustomItems.AddWaterBucketRecipe(__instance);
+    }
 }

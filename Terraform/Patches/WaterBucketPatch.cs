@@ -6,7 +6,7 @@ using UnityEngine;
 namespace Terraform.Patches;
 
 internal static class WaterBucket {
-    private const string ItemName = "tfm_water_bucket";
+    public const string ItemName = "tfm_water_bucket";
     private const string AmountKey = "Terraform.WaterAmount";
     private const float Reach = 8f;
     private const float AimDistance = 50f;
