@@ -15,14 +15,20 @@ public class TerraformPlugin : BaseUnityPlugin {
     private Harmony _harmony;
 
     private void Awake() {
-        Log = Logger;
         ModConfig.Init(Config);
+        Log = new ManualLogSource(ModName);
+        Log.LogEvent += (_, e) => {
+            if (ShouldShow(e.Level)) Logger.Log(e.Level, e.Data);
+        };
 
         _harmony = new Harmony(ModGuid);
         _harmony.PatchAll();
 
         Log.LogInfo($"{ModName} {Version} loaded.");
     }
+
+    private static bool ShouldShow(LogLevel level) =>
+        ModConfig.DebugMode.Value || (level & (LogLevel.Error | LogLevel.Fatal)) != 0;
 
     private void OnDestroy() {
         _harmony?.UnpatchSelf();

@@ -8,36 +8,36 @@ public partial class TerraformManager {
         bool alt   = Input.GetKey(KeyCode.LeftAlt)     || Input.GetKey(KeyCode.RightAlt);
         bool ctrl  = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
 
-        if (VerboseLogs) {
-            if (Input.GetKeyDown(KeyCode.F10)) {
-                if      (alt)   MeasureNavMeshFragmentation();
-                else if (shift) ToggleNavOverlay();
-                else            ProbeNavMeshAtPlayer();
-                return;
-            }
+        if (!VerboseLogs) return;
 
-            if (Input.GetKeyDown(KeyCode.F11)) {
-                if      (alt)   ToggleDebugNoNormalMap();
-                else if (shift) ToggleDebugMagenta();
-                else            InspectTriangleAtCrosshair();
-                return;
-            }
+        if (Input.GetKeyDown(KeyCode.F10)) {
+            if      (alt)   MeasureNavMeshFragmentation();
+            else if (shift) ToggleNavOverlay();
+            else            ProbeNavMeshAtPlayer();
+            return;
+        }
 
-            if (Input.GetKeyDown(KeyCode.F12)) {
-                if (ctrl) {
-                    ToggleLeakDebug();
-                } else if (alt) {
-                    ToggleHideWater();
-                } else if (shift) {
-                    ToggleHideHeightmaps();
-                } else {
-                    _showDebugGrid = !_showDebugGrid;
-                    if (_showDebugGrid) { RefreshDebugGrids(); RefreshDebugChunkWalls(); }
-                    else                { ClearDebugGrids();   ClearDebugChunkWalls();   }
-                    TerraformPlugin.Log.LogInfo($"Debug grid: {_showDebugGrid}");
-                }
-                return;
+        if (Input.GetKeyDown(KeyCode.F11)) {
+            if      (alt)   ToggleDebugNoNormalMap();
+            else if (shift) ToggleDebugMagenta();
+            else            InspectTriangleAtCrosshair();
+            return;
+        }
+
+        if (Input.GetKeyDown(KeyCode.F12)) {
+            if (ctrl) {
+                ToggleLeakDebug();
+            } else if (alt) {
+                ToggleHideWater();
+            } else if (shift) {
+                ToggleHideHeightmaps();
+            } else {
+                _showDebugGrid = !_showDebugGrid;
+                if (_showDebugGrid) { RefreshDebugGrids(); RefreshDebugChunkWalls(); }
+                else                { ClearDebugGrids();   ClearDebugChunkWalls();   }
+                TerraformPlugin.Log.LogInfo($"Debug grid: {_showDebugGrid}");
             }
+            return;
         }
 
         if (shift || alt || ctrl) return;
