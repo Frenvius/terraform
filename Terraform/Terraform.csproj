@@ -94,8 +94,7 @@
     <Reference Include="UnityEngine.AIModule">
       <HintPath>$(VALHEIM_INSTALL)\valheim_Data\Managed\UnityEngine.AIModule.dll</HintPath>
       <Private>False</Private>
-    </Reference>
-  </ItemGroup>
+    </Reference>  </ItemGroup>
 
   <!-- System -->
   <ItemGroup>
@@ -131,6 +130,8 @@
     <Compile Include="Patches\TerrainOpPatches.cs" />
     <Compile Include="Water\BucketWaterMath.cs" />
     <Compile Include="Water\PlacedWater.cs" />
+    <Compile Include="Water\WaterTransfers.cs" />
+    <Compile Include="Water\BucketLedger.cs" />
     <Compile Include="Water\WaterStreamSolver.cs" />
     <Compile Include="Water\WaterStreamMesh.cs" />
     <Compile Include="Patches\Types\ChunkRenderData.cs" />
@@ -162,6 +163,11 @@
     <Compile Include="Manager\TerraformManager.WaterLeak.cs" />
     <Compile Include="Manager\TerraformManager.WaterLeakDebug.cs" />
     <Compile Include="Persistence\TerraformPersistence.cs" />
+    <Compile Include="Manager\TerraformManager.Network.cs" />
+    <Compile Include="Network\ZoneState.cs" />
+    <Compile Include="Network\VoxelZone.cs" />
+    <Compile Include="Network\ServerSync.cs" />
+    <Compile Include="Patches\DirtPaintOp.cs" />
     <Compile Include="Assets\TerraformBundle.cs" />
     <EmbeddedResource Include="Resources\terraform" Condition="Exists('Resources\terraform')">
       <LogicalName>Terraform.Resources.terraform</LogicalName>

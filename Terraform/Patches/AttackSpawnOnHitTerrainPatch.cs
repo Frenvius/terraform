@@ -16,7 +16,7 @@ public static class Attack_SpawnOnHitTerrain_Patch {
         var manager = TerraformManager.Instance;
         if (manager == null) return true;
         if (character == null || character != Player.m_localPlayer) return true;
-        if (manager.DiggingBlockedAsClient()) return true;
+        if (manager.DiggingUnavailable()) return true;
 
         if (manager.PerformDigAt(hitPoint))
             PickaxeEffectFx.PlayRockBreakEffects(hitPoint, Quaternion.identity);

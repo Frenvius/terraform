@@ -29,15 +29,19 @@ public partial class TerraformManager {
         Mathf.Clamp(Mathf.FloorToInt(localY / PaintBandHeight), 0, PaintBandCount - 1);
 
     public void PaintUnderground(Vector3 worldPos, float radius, TerrainModifier.PaintType type) {
-        if (type != TerrainModifier.PaintType.Paved && type != TerrainModifier.PaintType.Dirt) return;
-        float target = type == TerrainModifier.PaintType.Paved ? 255f : 0f;
-
         foreach (var data in _chunks.Values) {
             if (data?.MeshObject == null) continue;
-            if (!PaintUndergroundChunk(data, worldPos, radius, target)) continue;
-            if (PaintedBandsChanged(data)) RebuildMesh(data);
-            else RefreshUndergroundMasks(data);
+            if (PaintUndergroundInChunk(data, worldPos, radius, type)) SubmitUndergroundPaint(data, worldPos, radius, type);
         }
+    }
+
+    private bool PaintUndergroundInChunk(ChunkRenderData data, Vector3 worldPos, float radius, TerrainModifier.PaintType type) {
+        if (type != TerrainModifier.PaintType.Paved && type != TerrainModifier.PaintType.Dirt) return false;
+        float target = type == TerrainModifier.PaintType.Paved ? 255f : 0f;
+        if (!PaintUndergroundChunk(data, worldPos, radius, target)) return false;
+        if (PaintedBandsChanged(data)) RebuildMesh(data);
+        else RefreshUndergroundMasks(data);
+        return true;
     }
 
     private bool PaintUndergroundChunk(ChunkRenderData data, Vector3 worldPos, float radius, float target) {
@@ -258,8 +262,8 @@ public partial class TerraformManager {
         }
     }
 
-    private void LoadUndergroundPaint(long chunkKey, Dictionary<int, byte> paved) {
-        if (paved == null || paved.Count == 0) return;
-        _undergroundPaved[chunkKey] = paved;
+    private void SetUndergroundPaint(long chunkKey, Dictionary<int, byte> paved) {
+        if (paved == null || paved.Count == 0) _undergroundPaved.Remove(chunkKey);
+        else _undergroundPaved[chunkKey] = paved;
     }
 }

@@ -38,74 +38,69 @@ public partial class TerraformManager {
         DigMode mode     = record.Mode;
         var swTotal = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
         int chunkHit = 0;
-        long carveTicks = 0, meshTicks = 0;
         float solidRemoved = 0f;
-        foreach (var kv in _chunks) {
-            var data = kv.Value;
+        foreach (var data in _chunks.Values) {
             if (data == null || data.MeshObject == null || data.Heightmap == null) continue;
 
             Vector3 origin = data.MeshObject.transform.position;
-            int chunkOriginX = Mathf.RoundToInt(origin.x);
-            int chunkOriginZ = Mathf.RoundToInt(origin.z);
-            if (!ChunkOverlapsDig(chunkOriginX, chunkOriginZ, worldPos, radius)) continue;
-
-            long chunkKey = ChunkKey(chunkOriginX, chunkOriginZ);
-            if (!_chunkDigHistory.TryGetValue(chunkKey, out var digs)) {
-                digs = new List<DigRecord>();
-                _chunkDigHistory[chunkKey] = digs;
-            }
-            digs.Add(record);
+            if (!ChunkOverlapsDig(Mathf.RoundToInt(origin.x), Mathf.RoundToInt(origin.z), worldPos, radius)) continue;
 
             chunkHit++;
-            var swCarve = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
-            EnsureChunkAllocated(data);
-            data.Chunk.TakeSolidRemoved();
-            CarveCrater(data, record);
-            solidRemoved += data.Chunk.TakeSolidRemoved();
-            if (swCarve != null) carveTicks += swCarve.ElapsedTicks;
-
-            RefreshCellOwnership(data, CellRectForDig(data, record));
-
-            if (IsCarvingMode(mode)) {
-                float paintRadius = DigFootprintRadius(record);
-                int painted = PaintCellsOpenedByVoxel(
-                    data,
-                    Mathf.FloorToInt(worldPos.x - paintRadius), Mathf.FloorToInt(worldPos.x + paintRadius),
-                    Mathf.FloorToInt(worldPos.z - paintRadius), Mathf.FloorToInt(worldPos.z + paintRadius));
-                if (painted > 0) {
-                    data.Heightmap.Poke();
-                    ClutterSystem.instance?.ResetGrass(worldPos, paintRadius * Mathf.Sqrt(2f) + 0.5f);
-                }
-            }
-
-            var swMesh = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
-            RebuildMesh(data);
-            if (swMesh != null) meshTicks += swMesh.ElapsedTicks;
-
-            if (_waters.TryGetValue(kv.Key, out var water)) RebuildWaterMeshFromHoles(water);
-
-            if (VerboseLogs) DebugLog(
-                $"Dig world=({worldPos.x:F2},{worldPos.y:F2},{worldPos.z:F2}) " +
-                $"mode={mode} terrainH={data.TerrainHeight:F1} " +
-                $"history={digs.Count}");
+            solidRemoved += ApplyDigToChunk(data, record);
+            if (IsCarvingMode(mode)) PaintGroundOpenedByDig(data, record);
+            SubmitDig(data, record);
         }
 
-        RefreshWaterLeaks();
-
-        if (chunkHit > 0) {
-            SettleStone(record, solidRemoved);
-            float reach = radius * OuterRadiusMultiplier + ExtendedPunchBleed;
-            MarkNavDirty(worldPos.x - reach, worldPos.z - reach, worldPos.x + reach, worldPos.z + reach);
-        }
-
-        if (chunkHit == 0)
+        if (chunkHit == 0) {
             TerraformPlugin.Log.LogWarning(
                 $"Dig: no chunk overlapping {worldPos} (total chunks={_chunks.Count})");
-        else if (swTotal != null) {
-            float toMs(long t) => (float)(t * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
-            DebugLog($"[perf] Dig total={swTotal.ElapsedMilliseconds}ms chunks={chunkHit} " +
-                     $"carve={toMs(carveTicks):F1}ms mesh={toMs(meshTicks):F1}ms");
+            return;
         }
+
+        FinishDig(record);
+        SettleStone(record, solidRemoved);
+        if (swTotal != null) DebugLog($"[perf] Dig total={swTotal.ElapsedMilliseconds}ms chunks={chunkHit}");
+    }
+
+    private float ApplyDigToChunk(ChunkRenderData data, DigRecord record) {
+        if (!_chunkDigHistory.TryGetValue(data.ChunkKey, out var digs)) {
+            digs = new List<DigRecord>();
+            _chunkDigHistory[data.ChunkKey] = digs;
+        }
+        digs.Add(record);
+
+        EnsureChunkAllocated(data);
+        data.Chunk.TakeSolidRemoved();
+        CarveCrater(data, record);
+        float solidRemoved = data.Chunk.TakeSolidRemoved();
+
+        RefreshCellOwnership(data, CellRectForDig(data, record));
+        RebuildMesh(data);
+        if (_waters.TryGetValue(data.Heightmap.GetInstanceID(), out var water)) RebuildWaterMeshFromHoles(water);
+
+        if (VerboseLogs) DebugLog(
+            $"Dig world=({record.WorldPos.x:F2},{record.WorldPos.y:F2},{record.WorldPos.z:F2}) " +
+            $"mode={record.Mode} terrainH={data.TerrainHeight:F1} history={digs.Count}");
+        return solidRemoved;
+    }
+
+    private void PaintGroundOpenedByDig(ChunkRenderData data, DigRecord record) {
+        Vector3 worldPos = record.WorldPos;
+        float paintRadius = DigFootprintRadius(record);
+        int painted = PaintCellsOpenedByVoxel(
+            data,
+            Mathf.FloorToInt(worldPos.x - paintRadius), Mathf.FloorToInt(worldPos.x + paintRadius),
+            Mathf.FloorToInt(worldPos.z - paintRadius), Mathf.FloorToInt(worldPos.z + paintRadius));
+        if (painted == 0) return;
+        data.Heightmap.Poke();
+        ClutterSystem.instance?.ResetGrass(worldPos, paintRadius * Mathf.Sqrt(2f) + 0.5f);
+    }
+
+    private void FinishDig(DigRecord record) {
+        RefreshWaterLeaks();
+        float reach = record.Radius * OuterRadiusMultiplier + ExtendedPunchBleed;
+        MarkNavDirty(record.WorldPos.x - reach, record.WorldPos.z - reach,
+                     record.WorldPos.x + reach, record.WorldPos.z + reach);
     }
 
     private void CarveCrater(ChunkRenderData data, DigRecord dig) {

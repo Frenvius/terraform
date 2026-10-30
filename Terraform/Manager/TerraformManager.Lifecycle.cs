@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using UnityEngine;
-using Terraform.Persistence;
 using Terraform.Voxel.Core;
 
 namespace Terraform.Patches;
@@ -19,10 +18,7 @@ public partial class TerraformManager {
                 var d = _chunks[k];
                 if (d?.MeshObject != null) Destroy(d.MeshObject);
                 if (d?.Mesh       != null) Destroy(d.Mesh);
-                if (d != null) {
-                    DestroyUndergroundMasks(d);
-                    if (!_pendingBuildHash.ContainsKey(k)) RetainUnloadedChunkSdf(d);
-                }
+                if (d != null) DestroyUndergroundMasks(d);
                 _chunks.Remove(k);
                 HolePunchSystem.Clear(k);
                 _pendingBuildHash.Remove(k);
@@ -90,25 +86,17 @@ public partial class TerraformManager {
                 Mathf.RoundToInt(hm.transform.position.x - halfA),
                 Mathf.RoundToInt(hm.transform.position.z - halfA));
             data.ChunkKey = lookupKey;
-            bool usedSavedTerrainHeight = false;
-            if (_pendingPersistence != null && _pendingPersistence.TryGetValue(lookupKey, out var savedEntry)
-                && savedEntry != null && savedEntry.TerrainHeight != 0f) {
-                data.TerrainHeight = savedEntry.TerrainHeight;
-                usedSavedTerrainHeight = true;
-            } else {
-                if (!Heightmap.GetHeight(hm.transform.position, out data.TerrainHeight))
-                    data.TerrainHeight = hm.transform.position.y;
-                data.TerrainHeight = Mathf.Round(data.TerrainHeight);
+            bool fromZone = TryGetZoneTerrainHeight(lookupKey, out float terrainHeight);
+            if (!fromZone) {
+                if (!Heightmap.GetHeight(hm.transform.position, out terrainHeight))
+                    terrainHeight = hm.transform.position.y;
+                terrainHeight = Mathf.Round(terrainHeight);
             }
-
-            data.MeshObject.transform.localPosition = new Vector3(
-                -halfA,
-                data.TerrainHeight - hm.transform.position.y - halfA,
-                -halfA);
+            PlaceChunkWindow(data, terrainHeight);
 
             _chunks[id] = data;
 
-            DebugLog($"ChunkRenderData -> {hm.gameObject.name} terrainH={data.TerrainHeight:F1} fromSave={usedSavedTerrainHeight}");
+            DebugLog($"ChunkRenderData -> {hm.gameObject.name} terrainH={data.TerrainHeight:F1} fromZone={fromZone}");
 
             _pendingBuildHash[id]  = ComputeHeightsHash(hm);
             _pendingBuildSince[id] = Time.time;
@@ -152,20 +140,16 @@ public partial class TerraformManager {
         }
         if (built.Count == 0) return;
 
-        foreach (var data in built) {
-            RebuildChunkFromHistory(data);
-            if (_waters.TryGetValue(data.Heightmap.GetInstanceID(), out var water)) RebuildWaterMeshFromHoles(water);
-        }
+        foreach (var data in built) BuildChunk(data);
     }
 
-    private void RetainUnloadedChunkSdf(ChunkRenderData data) {
-        if (data.Chunk == null || !data.Chunk.HasAnyAltered()) return;
-        _pendingPersistence[data.ChunkKey] = new ChunkPersistence {
-            TerrainHeight   = data.TerrainHeight,
-            VoxelData       = data.Chunk.SerializeFull(),
-            VoxelDataIsFull = true,
-            AlteredBits     = data.Chunk.SerializeAltered(),
-        };
+    private static void PlaceChunkWindow(ChunkRenderData data, float terrainHeight) {
+        const int half = VoxelChunk.SIZE / 2;
+        data.TerrainHeight = terrainHeight;
+        data.MeshObject.transform.localPosition = new Vector3(
+            -half,
+            terrainHeight - data.Heightmap.transform.position.y - half,
+            -half);
     }
 
     private void ResetChunkDigState(ChunkRenderData data) {
@@ -173,47 +157,20 @@ public partial class TerraformManager {
         EnsureChunkAllocated(data);
     }
 
-    private static void RestoreSavedSdf(ChunkRenderData data, ChunkPersistence saved) {
-        float[] values = saved.VoxelDataIsFull
-            ? VoxelChunk.DecodeFull(saved.VoxelData)
-            : VoxelChunk.DecodeQuantized(saved.VoxelData);
-        if (saved.AlteredBits != null) data.Chunk.RestoreAltered(values, saved.AlteredBits);
-        else data.Chunk.RestoreLegacy(values);
+    private void ClearChunkMesh(ChunkRenderData data) {
+        data.Mesh.Clear();
+        SetChunkVisible(data, false);
+        if (data.Collider != null) data.Collider.sharedMesh = null;
     }
 
-    private void RebuildChunkFromHistory(ChunkRenderData data) {
-        Vector3 origin = data.MeshObject.transform.position;
-        int chunkOriginX = Mathf.RoundToInt(origin.x);
-        int chunkOriginZ = Mathf.RoundToInt(origin.z);
-        long chunkKey = ChunkKey(chunkOriginX, chunkOriginZ);
-        if (!_chunkDigHistory.TryGetValue(chunkKey, out var digs) || digs.Count == 0) {
-            data.Mesh.Clear();
-            SetChunkVisible(data, false);
-            if (data.Collider != null) data.Collider.sharedMesh = null;
-            return;
-        }
-
-        ResetChunkDigState(data);
-
-        if (_pendingPersistence != null
-            && _pendingPersistence.TryGetValue(chunkKey, out var savedEntry)
-            && savedEntry?.VoxelData != null
-            && savedEntry.VoxelData.Length > 0) {
-            RestoreSavedSdf(data, savedEntry);
-            _pendingPersistence.Remove(chunkKey);
-            DebugLog($"  restored SDF for chunk ({digs.Count} digs, full={savedEntry.VoxelDataIsFull})");
-        } else {
-            int replayed = 0;
-            foreach (var dig in digs) {
-                CarveCrater(data, dig);
-                replayed++;
-            }
-            DebugLog($"  replayed {replayed} digs onto new chunk");
-        }
-
+    private void RefreshChunkAfterStateChange(ChunkRenderData data) {
         RefreshCellOwnership(data, CellRect.Whole);
         RebuildMesh(data);
-        MarkNavDirty(chunkOriginX, chunkOriginZ, chunkOriginX + VoxelChunk.SIZE, chunkOriginZ + VoxelChunk.SIZE);
+        if (_waters.TryGetValue(data.Heightmap.GetInstanceID(), out var water)) RebuildWaterMeshFromHoles(water);
+        Vector3 origin = data.MeshObject.transform.position;
+        int originX = Mathf.RoundToInt(origin.x);
+        int originZ = Mathf.RoundToInt(origin.z);
+        MarkNavDirty(originX, originZ, originX + VoxelChunk.SIZE, originZ + VoxelChunk.SIZE);
     }
 
     private static bool ChunkOverlapsDig(int chunkOriginX, int chunkOriginZ, Vector3 worldPos, float radius) {

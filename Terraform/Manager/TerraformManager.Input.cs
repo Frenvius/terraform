@@ -70,20 +70,20 @@ public partial class TerraformManager {
         action(hit);
     }
 
-    private bool _clientDigWarned;
+    private bool _digBlockedWarned;
 
-    public bool DiggingBlockedAsClient() {
-        if (ZNet.instance == null || ZNet.instance.IsServer()) return false;
-        if (!_clientDigWarned) {
-            _clientDigWarned = true;
-            TerraformPlugin.Log.LogWarning("Voxel digging is disabled while connected to a server as a client.");
+    public bool DiggingUnavailable() {
+        if (Network.ServerSync.ServerRunsTerraform) return false;
+        if (!_digBlockedWarned) {
+            _digBlockedWarned = true;
+            TerraformPlugin.Log.LogWarning($"Voxel digging is disabled: the server does not run Terraform {TerraformPlugin.Version}.");
         }
         return true;
     }
 
     private bool CanDigAt(Vector3 worldPos) {
-        if (DiggingBlockedAsClient()) return false;
-        float radius = Configs.ModConfig.BrushSize?.Value ?? 1.5f;
+        if (DiggingUnavailable()) return false;
+        float radius = Network.ServerSync.BrushSize;
         if (!PrivateArea.CheckAccess(worldPos, radius)) return false;
         return !Location.IsInsideNoBuildLocation(worldPos);
     }
@@ -100,7 +100,7 @@ public partial class TerraformManager {
     }
 
     private bool PerformRaiseAt(Vector3 worldPos, Vector3 surfaceNormal) {
-        return PerformRaiseAt(worldPos, surfaceNormal, Configs.ModConfig.BrushSize.Value * RaiseRadiusMultiplier, 0f);
+        return PerformRaiseAt(worldPos, surfaceNormal, Network.ServerSync.BrushSize * RaiseRadiusMultiplier, 0f);
     }
 
     private bool PerformRaiseAt(Vector3 worldPos, Vector3 surfaceNormal, float radius, float height) {
@@ -119,7 +119,7 @@ public partial class TerraformManager {
 
     private void LiftCharactersOutOfRaise(Vector3 center, float footprintRadius) {
         foreach (var character in Character.GetAllCharacters()) {
-            if (character == null) continue;
+            if (character == null || !character.IsOwner()) continue;
             Vector3 feet = character.transform.position;
             if (HorizontalDistance(feet, center) > footprintRadius + character.GetRadius()) continue;
             if (!TryFindAirAbove(feet, RaiseLiftMaxRise, out float airY)) continue;
@@ -144,7 +144,7 @@ public partial class TerraformManager {
         var hm = Heightmap.FindHeightmap(worldPos);
         if (hm == null) return false;
 
-        float radius = Configs.ModConfig.BrushSize.Value;
+        float radius = Network.ServerSync.BrushSize;
 
         OriginalHeight(worldPos, out float terrainY);
         float surfaceY = SurfaceHeight(worldPos, terrainY);

@@ -80,6 +80,62 @@ public class VoxelChunk {
         return data;
     }
 
+    public void WriteAltered(System.IO.BinaryWriter writer) {
+        writer.Write(CountAltered());
+        int previous = -1;
+        for (int word = 0; word < AlteredWords; word++) {
+            ulong bits = _altered[word];
+            while (bits != 0UL) {
+                int bit = TrailingZeroCount(bits);
+                bits &= bits - 1UL;
+                int i = (word << 6) + bit;
+                WriteVarUInt(writer, (uint)(i - previous - 1));
+                writer.Write(_voxels[i].Value);
+                previous = i;
+            }
+        }
+    }
+
+    public void ReadAltered(System.IO.BinaryReader reader) {
+        int count = reader.ReadInt32();
+        int previous = -1;
+        for (int n = 0; n < count; n++) {
+            int i = previous + 1 + (int)ReadVarUInt(reader);
+            float value = reader.ReadSingle();
+            if (i < 0 || i >= TOTAL) throw new System.IO.InvalidDataException($"altered voxel index {i} out of range");
+            _voxels[i].Value = value;
+            SetBit(i);
+            previous = i;
+        }
+    }
+
+    public static void WriteVarUInt(System.IO.BinaryWriter writer, uint value) {
+        while (value >= 0x80u) {
+            writer.Write((byte)(value | 0x80u));
+            value >>= 7;
+        }
+        writer.Write((byte)value);
+    }
+
+    public static uint ReadVarUInt(System.IO.BinaryReader reader) {
+        uint value = 0;
+        for (int shift = 0; shift < 35; shift += 7) {
+            byte b = reader.ReadByte();
+            value |= (uint)(b & 0x7F) << shift;
+            if ((b & 0x80) == 0) return value;
+        }
+        throw new System.IO.InvalidDataException("varint too long");
+    }
+
+    private static int TrailingZeroCount(ulong bits) {
+        int count = 0;
+        while ((bits & 1UL) == 0UL) {
+            bits >>= 1;
+            count++;
+        }
+        return count;
+    }
+
     public static float[] DecodeFull(byte[] data) {
         int n = (data.Length / 4) < TOTAL ? (data.Length / 4) : TOTAL;
         var f = new float[n];

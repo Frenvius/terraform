@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using UnityEngine;
-using Terraform.Persistence;
 
 namespace Terraform.Patches;
 
@@ -8,8 +7,7 @@ public partial class TerraformManager : MonoBehaviour {
     public static TerraformManager Instance;
 
     private Dictionary<int, ChunkRenderData> _chunks;
-    private Dictionary<long, List<DigRecord>> _chunkDigHistory = new();
-    private Dictionary<long, ChunkPersistence> _pendingPersistence = new();
+    private readonly Dictionary<long, List<DigRecord>> _chunkDigHistory = new();
     private readonly Dictionary<int, long> _pendingBuildHash = new();
     private readonly Dictionary<int, float> _pendingBuildSince = new();
     private bool _persistenceLoaded;
@@ -43,7 +41,7 @@ public partial class TerraformManager : MonoBehaviour {
     private const float GroundOpNormalMinY = 0.5f;
 
     private const float ExtendedPunchBleed     = 2f;
-    private const float OpenedCellPaintRadius  = 1f;
+    private const float OpenedCellPaintRadius  = DirtPaintOp.Radius;
 
     private const int FloorSentinelLayers = 1;
     private const int GlobalBedrockY     = 0;
@@ -79,23 +77,6 @@ public partial class TerraformManager : MonoBehaviour {
         if (Instance == this) Instance = null;
     }
 
-    private void TryLoadPersistence() {
-        if (_persistenceLoaded) return;
-        if (ZNet.instance == null) return;
-        if (string.IsNullOrEmpty(ZNet.instance.GetWorldName())) return;
-
-        var loaded = TerraformPersistence.Load();
-        if (loaded != null) {
-            _pendingPersistence = loaded;
-            _chunkDigHistory = new Dictionary<long, List<DigRecord>>(loaded.Count);
-            foreach (var kv in loaded) {
-                _chunkDigHistory[kv.Key] = kv.Value.Digs;
-                LoadUndergroundPaint(kv.Key, kv.Value.UndergroundPaved);
-            }
-        }
-        _persistenceLoaded = true;
-    }
-
     private void TrySubscribeWorldSave() {
         if (_saveSubscribed) return;
         ZNet.WorldSaveStarted += OnWorldSaveStarted;
@@ -106,42 +87,6 @@ public partial class TerraformManager : MonoBehaviour {
         if (!_saveSubscribed) return;
         ZNet.WorldSaveStarted -= OnWorldSaveStarted;
         _saveSubscribed = false;
-    }
-
-    private void OnWorldSaveStarted() {
-        Water.PlacedWater.SaveAll();
-        var snapshot = BuildPersistenceSnapshot();
-        TerraformPersistence.Save(snapshot);
-    }
-
-    private Dictionary<long, ChunkPersistence> BuildPersistenceSnapshot() {
-        var snapshot = new Dictionary<long, ChunkPersistence>(_chunkDigHistory.Count);
-        foreach (var kv in _chunkDigHistory) {
-            var entry = new ChunkPersistence { Digs = new List<DigRecord>(kv.Value) };
-            _undergroundPaved.TryGetValue(kv.Key, out entry.UndergroundPaved);
-            if (_pendingPersistence.TryGetValue(kv.Key, out var unloaded) && unloaded.VoxelDataIsFull) {
-                entry.TerrainHeight   = unloaded.TerrainHeight;
-                entry.VoxelData       = unloaded.VoxelData;
-                entry.VoxelDataIsFull = true;
-                entry.AlteredBits     = unloaded.AlteredBits;
-            }
-            snapshot[kv.Key] = entry;
-        }
-        if (_chunks != null) {
-            foreach (var data in _chunks.Values) {
-                if (data == null || data.MeshObject == null) continue;
-                Vector3 origin = data.MeshObject.transform.position;
-                long chunkKey = ChunkKey(Mathf.RoundToInt(origin.x), Mathf.RoundToInt(origin.z));
-                if (!snapshot.TryGetValue(chunkKey, out var entry)) continue;
-                entry.TerrainHeight = data.TerrainHeight;
-                if (data.Chunk != null && data.Chunk.HasAnyAltered()) {
-                    entry.VoxelData = data.Chunk.SerializeFull();
-                    entry.VoxelDataIsFull = true;
-                    entry.AlteredBits = data.Chunk.SerializeAltered();
-                }
-            }
-        }
-        return snapshot;
     }
 
     public bool HasDigsAround(Vector3 worldPos) {
@@ -199,7 +144,7 @@ public partial class TerraformManager : MonoBehaviour {
     }
 
     private void Update() {
-        TryLoadPersistence();
+        TryImportSidecar();
         TrySubscribeWorldSave();
 
         _scanTimer += Time.deltaTime;
@@ -210,6 +155,8 @@ public partial class TerraformManager : MonoBehaviour {
         ReseedDirtyChunks();
         FlushNavDirty();
         UpdateWaterStreams();
+        Water.BucketLedger.Tick();
+        WaterBucket.SyncPeriodically();
         UpdateUndergroundCollision();
         HandleInput();
     }

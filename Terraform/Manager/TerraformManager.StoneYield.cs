@@ -14,7 +14,7 @@ public partial class TerraformManager {
 
         player.m_customData.TryGetValue(StoneBalanceKey, out string stored);
         float balance = StoneYield.Accrue(
-            StoneYield.ReadBalance(stored), record.Mode, solidRemoved, Configs.ModConfig.StonePerCubicMeter.Value);
+            StoneYield.ReadBalance(stored), record.Mode, solidRemoved, Network.ServerSync.StonePerCubicMeter);
         int stones = StoneYield.TakeWholeStones(ref balance);
         player.m_customData[StoneBalanceKey] = StoneYield.WriteBalance(balance);
 

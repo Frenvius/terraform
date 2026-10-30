@@ -41,7 +41,14 @@ public static class CustomItems {
             if (!target.Contains(prefab)) target.Add(prefab);
     }
 
-    public static void AddWaterBucketRecipe(ObjectDB db) {
+    public static void Register(ObjectDB db) {
+        if (db == null || db.m_items.Count == 0) return;
+        AddMissing(db.m_items);
+        AddWaterBucketRecipe(db);
+        DirtPaintOp.Register(db);
+    }
+
+    private static void AddWaterBucketRecipe(ObjectDB db) {
         const string recipeName = "Recipe_" + WaterBucket.ItemName;
         if (db.m_recipes.Exists(recipe => recipe != null && recipe.name == recipeName)) return;
 
@@ -108,13 +115,16 @@ public static class ZNetScene_Awake_RegisterItems_Patch {
         CustomItems.ResolveMockMaterials();
         CustomItems.AddMissing(__instance.m_prefabs);
         PlacedWater.Register(__instance);
+        Network.VoxelZone.Register(__instance);
     }
 }
 
 [HarmonyPatch(typeof(ObjectDB), "Awake")]
 public static class ObjectDB_Awake_RegisterItems_Patch {
-    static void Prefix(ObjectDB __instance) {
-        CustomItems.AddMissing(__instance.m_items);
-        CustomItems.AddWaterBucketRecipe(__instance);
-    }
+    static void Prefix(ObjectDB __instance) => CustomItems.Register(__instance);
+}
+
+[HarmonyPatch(typeof(ObjectDB), nameof(ObjectDB.CopyOtherDB))]
+public static class ObjectDB_CopyOtherDB_RegisterItems_Patch {
+    static void Prefix(ObjectDB other) => CustomItems.Register(other);
 }

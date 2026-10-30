@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Threading;
 using HarmonyLib;
 using Terraform.Configs;
+using Terraform.Network;
 using Terraform.Patches;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -25,6 +26,11 @@ public sealed class PlacedWater : MonoBehaviour {
     private const float ExchangeInterval = 0.05f;
     private const float EmptyLifetime = 10f;
     private const int MaxFloorLayers = 8;
+    private const string TransferRpc = "tfm_WaterTransfer";
+    private const string AckRpc = "tfm_WaterAck";
+    private const string YieldRpc = "tfm_WaterYield";
+    private const float YieldRetryInterval = 1f;
+    private const float SyncInterval = 0.5f;
     private static readonly int WaterTimeId = Shader.PropertyToID("_WaterTime");
     private static readonly int DepthFadeId = Shader.PropertyToID("_DepthFade");
     private static readonly (int x, int z)[] Directions = { (1, 0), (-1, 0), (0, 1), (0, -1) };
@@ -54,6 +60,7 @@ public sealed class PlacedWater : MonoBehaviour {
     private int _row;
     private float _probeY;
     private float _keepAlive;
+    private float _yieldRequestedAt = float.MinValue;
     private readonly bool[] _blockedRight = new bool[Size * Size];
     private readonly bool[] _blockedForward = new bool[Size * Size];
     private readonly bool[] _nearWater = new bool[Size * Size];
@@ -71,7 +78,9 @@ public sealed class PlacedWater : MonoBehaviour {
         }
     }
 
-    private bool Usable => !_loadFailed && _volume != null && _view != null && _view.IsValid() && _view.IsOwner();
+    private bool Ready => !_loadFailed && _volume != null && _view != null && _view.IsValid();
+    private bool Usable => Ready && _view.IsOwner();
+    private long Owner => _view.GetZDO().GetOwner();
 
     public static void Register(ZNetScene scene) {
         if (_prefab == null) {
@@ -94,6 +103,7 @@ public sealed class PlacedWater : MonoBehaviour {
             liquid.m_liquidType = LiquidType.Water;
             liquid.m_initialVolume = 0f;
             liquid.m_initialArea = 1;
+            liquid.m_saveInterval = SyncInterval;
             liquid.m_viscocity = 1f;
             liquid.m_noiseHeight = 0f;
             liquid.m_collider = null;
@@ -123,6 +133,9 @@ public sealed class PlacedWater : MonoBehaviour {
         _keepAlive = Time.time;
         Volumes.Add(volume, this);
         Instances.Add(this);
+        _view.Register<long, bool, Vector3, float>(TransferRpc, RPC_Transfer);
+        _view.Register<long>(AckRpc, RPC_Ack);
+        _view.Register<long>(YieldRpc, RPC_Yield);
     }
 
     private void OnDestroy() => Instances.Remove(this);
@@ -307,7 +320,7 @@ public sealed class PlacedWater : MonoBehaviour {
     }
 
     private void Exchange() {
-        if (!Usable || !_haveGround || !Monitor.TryEnter(DataLock(_volume))) return;
+        if (!Ready || !_haveGround || !Monitor.TryEnter(DataLock(_volume))) return;
         try {
             foreach (var direction in Directions) Push(direction.x, direction.z);
             foreach (float depth in Depths(_volume)) {
@@ -318,7 +331,27 @@ public sealed class PlacedWater : MonoBehaviour {
         } finally {
             Monitor.Exit(DataLock(_volume));
         }
-        if (Time.time - _keepAlive > EmptyLifetime) _view.Destroy();
+        if (Usable && Time.time - _keepAlive > EmptyLifetime && !WaterTransfers.HasReceipts(_view.GetZDO())) _view.Destroy();
+    }
+
+    private void UnifyOwnerWith(PlacedWater neighbor) {
+        if (!Usable || neighbor.Owner == 0L) return;
+        if (!VoxelZone.Precedes(neighbor._view.GetZDO().m_uid, _view.GetZDO().m_uid)) {
+            if (Time.time - _yieldRequestedAt < YieldRetryInterval) return;
+            _yieldRequestedAt = Time.time;
+            neighbor._view.InvokeRPC(YieldRpc, Owner);
+            return;
+        }
+        HandOwnershipTo(neighbor.Owner);
+    }
+
+    private void HandOwnershipTo(long owner) {
+        Save();
+        _view.GetZDO().SetOwner(owner);
+    }
+
+    private void RPC_Yield(long sender, long owner) {
+        if (Usable && owner != Owner) HandOwnershipTo(owner);
     }
 
     private static int EdgeIndex(int dx, int dz, int i, bool mine) {
@@ -336,11 +369,16 @@ public sealed class PlacedWater : MonoBehaviour {
         var center = new Vector3(_origin.x + dx * Pitch, _origin.y + heights[wet] + depths[wet], _origin.z + dz * Pitch);
         var neighbor = FindOwner(center);
         if (neighbor == null) {
-            Spawn(center);
+            if (Usable) Spawn(center);
             return;
         }
         neighbor._keepAlive = Time.time;
-        if (!neighbor.Usable || !neighbor._haveGround || !Monitor.TryEnter(DataLock(neighbor._volume))) return;
+        if (!neighbor.Ready || !neighbor._haveGround) return;
+        if (neighbor.Owner != Owner) {
+            UnifyOwnerWith(neighbor);
+            return;
+        }
+        if (!Monitor.TryEnter(DataLock(neighbor._volume))) return;
         try {
             var theirHeights = Heights(neighbor._volume);
             var theirDepths = Depths(neighbor._volume);
@@ -439,7 +477,7 @@ public sealed class PlacedWater : MonoBehaviour {
     }
 
     private int LandingIndex(Vector3 landing) {
-        if (!Usable) return -1;
+        if (!Ready) return -1;
         if (!_haveGround) {
             lock (DataLock(_volume)) {
                 _row = 0;
@@ -506,28 +544,57 @@ public sealed class PlacedWater : MonoBehaviour {
         return level;
     }
 
-    public static bool TryCollect(Vector3 point, float requested, out float moved) {
-        moved = 0f;
+    private bool HoldsWaterAt(Vector3 point) {
+        float level = Sample(point);
+        return level > NoWater && point.y <= level + 0.1f;
+    }
+
+    private static float CollectLocal(Vector3 point, float requested) {
         foreach (var water in Instances) {
-            if (water == null || !water.Usable) continue;
-            float level = water.Sample(point);
-            if (level <= NoWater || point.y > level + 0.1f) continue;
+            if (water == null || !water.Usable || !water.HoldsWaterAt(point)) continue;
+            float moved;
             lock (DataLock(water._volume)) {
                 moved = BucketWaterMath.Withdraw(Depths(water._volume), water.IndexAt(point), requested, water.CanFlowEitherWay);
                 if (moved > 0f) water.Changed();
             }
-            if (moved > 0f) return true;
+            if (moved > 0f) return moved;
         }
+        return 0f;
+    }
+
+    private static bool HoldsNaturalWaterAt(Vector3 point) {
         foreach (var water in WaterVolume.Instances) {
             if (water == null) continue;
             var collider = water.GetComponent<Collider>();
             if (collider == null || !collider.bounds.Contains(point)) continue;
             float level = water.GetWaterSurface(point);
-            if (level <= NoWater || point.y > level + 0.1f) continue;
-            moved = requested;
-            return true;
+            if (level > NoWater && point.y <= level + 0.1f) return true;
         }
         return false;
+    }
+
+    public static bool SendTransfer(ZDOID area, long nonce, bool pour, Vector3 point, float amount) {
+        long owner = ZDOMan.instance?.GetZDO(area)?.GetOwner() ?? 0L;
+        if (owner == 0L) return false;
+        ZRoutedRpc.instance.InvokeRoutedRPC(owner, area, TransferRpc, nonce, pour, point, amount);
+        return true;
+    }
+
+    public static bool SendAck(ZDOID area, long nonce) {
+        long owner = ZDOMan.instance?.GetZDO(area)?.GetOwner() ?? 0L;
+        if (owner == 0L) return false;
+        ZRoutedRpc.instance.InvokeRoutedRPC(owner, area, AckRpc, nonce);
+        return true;
+    }
+
+    private void RPC_Transfer(long sender, long nonce, bool pour, Vector3 point, float amount) {
+        if (!Usable || !BucketLedger.IsFromServer(sender) || WaterTransfers.TryGetReceipt(_view.GetZDO(), nonce, out _)) return;
+        float moved = pour ? PourLocal(point, amount) : CollectLocal(point, amount);
+        WaterTransfers.AddReceipt(_view.GetZDO(), nonce, moved);
+    }
+
+    private void RPC_Ack(long sender, long nonce) {
+        if (Usable && BucketLedger.IsFromServer(sender)) WaterTransfers.RemoveReceipt(_view.GetZDO(), nonce);
     }
 
     private static PlacedWater Spawn(Vector3 position) {
@@ -539,13 +606,55 @@ public sealed class PlacedWater : MonoBehaviour {
         return water;
     }
 
-    public static float Pour(Vector3 landing, float amount) {
-        if (_prefab == null) return 0f;
-        if (GetNaturalLevel(landing) > landing.y) return amount;
+    public static bool TryPlanPour(Vector3 landing, out BucketAction action, out ZDOID area) {
+        area = ZDOID.None;
+        action = BucketAction.NaturalPour;
+        if (GetNaturalLevel(landing) > landing.y) return true;
+        action = BucketAction.Pour;
+        if (_prefab == null) return false;
+        var target = PourTarget(landing) ?? NearestArea(landing) ?? Spawn(new Vector3(Snap(landing.x), landing.y + 0.05f, Snap(landing.z)));
+        if (!target.Ready) return false;
+        area = target._view.GetZDO().m_uid;
+        return true;
+    }
+
+    public static bool TryPlanCollect(Vector3 point, out BucketAction action, out ZDOID area) {
+        area = ZDOID.None;
+        action = BucketAction.Collect;
+        foreach (var water in Instances) {
+            if (water == null || !water.Ready || !water.HoldsWaterAt(point)) continue;
+            area = water._view.GetZDO().m_uid;
+            return true;
+        }
+        action = BucketAction.NaturalFill;
+        return HoldsNaturalWaterAt(point);
+    }
+
+    private static PlacedWater PourTarget(Vector3 landing) {
+        foreach (var water in Instances)
+            if (water != null && water.Ready && water.Owns(landing) && water.LandingIndex(landing) >= 0) return water;
+        return null;
+    }
+
+    private static PlacedWater NearestArea(Vector3 point) {
+        PlacedWater nearest = null;
+        float nearestDistance = float.MaxValue;
+        foreach (var water in Instances) {
+            if (water == null || !water.Ready) continue;
+            var offset = point - water._origin;
+            if (Mathf.Abs(offset.x) > Pitch * 1.5f || Mathf.Abs(offset.z) > Pitch * 1.5f || Mathf.Abs(offset.y) > Range) continue;
+            if (offset.sqrMagnitude >= nearestDistance) continue;
+            nearest = water;
+            nearestDistance = offset.sqrMagnitude;
+        }
+        return nearest;
+    }
+
+    private static float PourLocal(Vector3 landing, float amount) {
         PlacedWater target = null;
         int index = -1;
         foreach (var water in Instances) {
-            if (water == null || !water.Owns(landing)) continue;
+            if (water == null || !water.Usable || !water.Owns(landing)) continue;
             index = water.LandingIndex(landing);
             if (index < 0) continue;
             target = water;

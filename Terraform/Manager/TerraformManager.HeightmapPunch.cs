@@ -76,11 +76,13 @@ public partial class TerraformManager {
             if (!CellGroundRemovedByVoxel(data, heights, origin, wcX, wcZ)) continue;
             tc ??= hm.GetAndCreateTerrainCompiler();
             if (tc == null) return 0;
-            PaintDirtCleared(tc, new Vector3(wcX + 0.5f, 0f, wcZ + 0.5f), OpenedCellPaintRadius);
+            var cellCenter = new Vector3(wcX + 0.5f, 0f, wcZ + 0.5f);
+            if (tc.IsOwner()) PaintDirtCleared(tc, cellCenter, OpenedCellPaintRadius);
+            else DirtPaintOp.Request(tc, cellCenter);
             painted++;
         }
 
-        if (painted > 0) SaveTerrainComp(tc);
+        if (painted > 0 && tc.IsOwner()) SaveTerrainComp(tc);
         return painted;
     }
 }

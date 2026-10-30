@@ -33,7 +33,7 @@ public partial class TerraformManager {
     }
 
     public TerrainOpVoxelPass BeginTerrainOp(Vector3 opPos, TerrainOp.Settings settings) {
-        if (DiggingBlockedAsClient()) return default;
+        if (DiggingUnavailable()) return default;
 
         if (IsVoxelRaise(settings)) {
             if (OpFitsVerticalWindow(opPos, settings.m_raiseRadius + settings.m_raiseDelta)) {

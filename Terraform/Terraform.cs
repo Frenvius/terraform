@@ -16,6 +16,7 @@ public class TerraformPlugin : BaseUnityPlugin {
 
     private void Awake() {
         ModConfig.Init(Config);
+        Network.ServerSync.Init();
         Log = new ManualLogSource(ModName);
         Log.LogEvent += (_, e) => {
             if (ShouldShow(e.Level)) Logger.Log(e.Level, e.Data);
