@@ -25,9 +25,16 @@ public static class TerraformBundle {
                 TerraformPlugin.Log.LogError($"[bundle] embedded resource '{EmbeddedResourceName}' not found - rebuild bundle in Unity then rebuild DLL");
                 return;
             }
-            _bundle = AssetBundle.LoadFromStream(stream);
+            var bytes = new byte[stream.Length];
+            int read = 0;
+            while (read < bytes.Length) {
+                int chunk = stream.Read(bytes, read, bytes.Length - read);
+                if (chunk <= 0) break;
+                read += chunk;
+            }
+            _bundle = AssetBundle.LoadFromMemory(bytes);
             if (_bundle == null) {
-                TerraformPlugin.Log.LogError("[bundle] AssetBundle.LoadFromStream returned null");
+                TerraformPlugin.Log.LogError("[bundle] AssetBundle.LoadFromMemory returned null");
                 return;
             }
             TerraformPlugin.Log.LogInfo($"[bundle] loaded embedded bundle ({stream.Length:N0} bytes)");
