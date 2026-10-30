@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using HarmonyLib;
@@ -33,6 +34,11 @@ public sealed class PlacedWater : MonoBehaviour {
     private const float SyncInterval = 0.5f;
     private static readonly int WaterTimeId = Shader.PropertyToID("_WaterTime");
     private static readonly int DepthFadeId = Shader.PropertyToID("_DepthFade");
+    private static readonly int ShoreFadeId = Shader.PropertyToID("_ShoreFade");
+    private const float CameraDepthShoreFade = 0.03f;
+    private static readonly List<Renderer> DrawnRenderers = new();
+    private static readonly List<Vector3> UpNormals = new(Enumerable.Repeat(Vector3.up, Size * Size));
+    private static float _vanillaShoreFade;
     private static readonly (int x, int z)[] Directions = { (1, 0), (-1, 0), (0, 1), (0, -1) };
     private static readonly ConditionalWeakTable<LiquidVolume, PlacedWater> Volumes = new();
     private static readonly List<PlacedWater> Instances = new();
@@ -64,6 +70,7 @@ public sealed class PlacedWater : MonoBehaviour {
     private readonly bool[] _blockedRight = new bool[Size * Size];
     private readonly bool[] _blockedForward = new bool[Size * Size];
     private readonly bool[] _nearWater = new bool[Size * Size];
+    private readonly PlacedWater[] _neighbors = new PlacedWater[4];
     private readonly List<Vector3> _vertices = new(Size * Size);
     private readonly List<Vector2> _uvs = new(Size * Size);
     private readonly List<int> _triangles = new(Width * Width * 6);
@@ -179,7 +186,7 @@ public sealed class PlacedWater : MonoBehaviour {
                 _material.SetFloatArray("_depth", new[] { 1f, 1f, 1f, 1f });
                 _material.SetColor("_ColorTop", _material.GetColor("_ColorBottom"));
                 _material.SetColor("_FoamColor", Color.clear);
-                _material.SetFloat("_ShoreFade", 0.03f);
+                _vanillaShoreFade = _material.GetFloat(ShoreFadeId);
                 _material.SetFloat("_IsLod", 0f);
                 _material.SetFloat("_VisibleMaxDistance", 100000f);
                 _material.SetFloat("_WaterEdge", 100000f);
@@ -189,6 +196,11 @@ public sealed class PlacedWater : MonoBehaviour {
         }
         _material.SetFloat(WaterTimeId, Time.time);
         _material.SetFloat(DepthFadeId, ModConfig.WaterOpaqueDepth.Value);
+        DrawnRenderers.Clear();
+        foreach (var water in Instances)
+            if (water != null && water._renderer != null && water._renderer.enabled) DrawnRenderers.Add(water._renderer);
+        bool trueDepth = PlacedWaterDepth.Update(_material, DrawnRenderers);
+        _material.SetFloat(ShoreFadeId, trueDepth ? _vanillaShoreFade : CameraDepthShoreFade);
     }
 
     public static void SaveAll() {
@@ -311,6 +323,8 @@ public sealed class PlacedWater : MonoBehaviour {
     private void Touch() {
         Dirty(_volume) = true;
         NeedsSaving(_volume) = true;
+        foreach (var neighbor in _neighbors)
+            if (neighbor is not null && neighbor._volume is not null) Dirty(neighbor._volume) = true;
     }
 
     private void Changed() {
@@ -320,6 +334,7 @@ public sealed class PlacedWater : MonoBehaviour {
     }
 
     private void Exchange() {
+        RefreshNeighbors();
         if (!Ready || !_haveGround || !Monitor.TryEnter(DataLock(_volume))) return;
         try {
             foreach (var direction in Directions) Push(direction.x, direction.z);
@@ -333,6 +348,32 @@ public sealed class PlacedWater : MonoBehaviour {
         }
         if (Usable && Time.time - _keepAlive > EmptyLifetime && !WaterTransfers.HasReceipts(_view.GetZDO())) _view.Destroy();
     }
+
+    private void RefreshNeighbors() {
+        for (int i = 0; i < Directions.Length; i++) {
+            var direction = Directions[i];
+            _neighbors[i] = FindOwner(new Vector3(_origin.x + direction.x * Pitch, _origin.y, _origin.z + direction.z * Pitch));
+        }
+    }
+
+    private bool TryNeighborSurface(int x, int z, out float surface) {
+        surface = 0f;
+        int direction = x == Width ? 0 : x == 0 ? 1 : z == Width ? 2 : z == 0 ? 3 : -1;
+        if (direction < 0) return false;
+        var neighbor = _neighbors[direction];
+        if (neighbor is null || !neighbor._haveGround || neighbor._loadFailed) return false;
+        var point = SamplePoint(z * Size + x, 0f);
+        int nx = Mathf.RoundToInt((point.x - neighbor._origin.x + HalfSize) / Scale);
+        int nz = Mathf.RoundToInt((point.z - neighbor._origin.z + HalfSize) / Scale);
+        if (nx < 1 || nz < 1 || nx >= Width || nz >= Width) return false;
+        float level = neighbor.MeshSurface(nz * Size + nx);
+        if (level >= BlockedFloor) return false;
+        surface = neighbor._origin.y + level - _origin.y;
+        return true;
+    }
+
+    private float MeshSurface(int index) =>
+        BucketWaterMath.Surface(Heights(_volume), Depths(_volume), index, Width, PlacedWaterDepth.MinVisibleDepth);
 
     private void UnifyOwnerWith(PlacedWater neighbor) {
         if (!Usable || neighbor.Owner == 0L) return;
@@ -414,14 +455,15 @@ public sealed class PlacedWater : MonoBehaviour {
         Array.Clear(_nearWater, 0, _nearWater.Length);
         for (int z = 1; z < Width; z++)
         for (int x = 1; x < Width; x++) {
-            if (depths[z * Size + x] <= BucketWaterMath.DryDepth) continue;
+            if (depths[z * Size + x] <= PlacedWaterDepth.MinVisibleDepth) continue;
             for (int dz = -1; dz <= 1; dz++)
             for (int dx = -1; dx <= 1; dx++) _nearWater[(z + dz) * Size + x + dx] = true;
         }
         for (int z = 0; z <= Width; z++)
         for (int x = 0; x <= Width; x++) {
             int index = z * Size + x;
-            float y = BucketWaterMath.Surface(heights, depths, index, Width);
+            float y = MeshSurface(index);
+            if (TryNeighborSurface(x, z, out float neighborSurface)) y = neighborSurface;
             _vertices.Add(new Vector3(x * Scale - HalfSize, y, z * Scale - HalfSize));
             _uvs.Add(new Vector2(x / (float)Width, z / (float)Width));
         }
@@ -447,7 +489,7 @@ public sealed class PlacedWater : MonoBehaviour {
         mesh.SetVertices(_vertices);
         mesh.SetUVs(0, _uvs);
         mesh.SetTriangles(_triangles, 0);
-        mesh.RecalculateNormals();
+        mesh.SetNormals(UpNormals);
         mesh.RecalculateTangents();
         mesh.RecalculateBounds();
         GetComponent<MeshFilter>().sharedMesh = mesh;

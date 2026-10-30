@@ -10,6 +10,7 @@ internal static class BucketWaterMath {
     public const float DryDepth = 0.001f;
     public const float FilmDepth = 0.2f;
     public const float RunoffDrop = 0.25f;
+    public const float RestingDrop = 0.05f;
     public const float FlowRate = 0.15f;
     public const float MaxDrop = 24f;
     private const float SplashDepth = 0.25f;
@@ -23,7 +24,7 @@ internal static class BucketWaterMath {
     public static float Transfer(float fromFloor, float fromDepth, float toFloor, float toDepth) {
         float difference = fromFloor + fromDepth - toFloor - toDepth;
         if (!(difference >= 0.001f) || !(fromDepth > 0f)) return 0f;
-        float retained = FilmDepth * Math.Max(0f, 1f - Math.Max(0f, fromFloor - toFloor) / RunoffDrop);
+        float retained = FilmDepth * Math.Max(0f, 1f - Math.Max(0f, fromFloor - toFloor) / RestingDrop);
         return Math.Max(0f, Math.Min(difference * FlowRate, fromDepth - retained));
     }
 
@@ -123,8 +124,8 @@ internal static class BucketWaterMath {
         return level + 0.05f;
     }
 
-    public static float Surface(IList<float> heights, IList<float> depths, int index, int width) {
-        if (depths[index] > DryDepth) return Level(index);
+    public static float Surface(IList<float> heights, IList<float> depths, int index, int width, float wetDepth = DryDepth) {
+        if (depths[index] > wetDepth) return Level(index);
         int size = width + 1;
         int x = index % size;
         int z = index / size;
@@ -134,7 +135,7 @@ internal static class BucketWaterMath {
             int nx = x + dx, nz = z + dz;
             if (nx < 0 || nz < 0 || nx > width || nz > width) continue;
             int neighbor = nz * size + nx;
-            if (depths[neighbor] > DryDepth) wetHeight = Math.Min(wetHeight, Level(neighbor));
+            if (depths[neighbor] > wetDepth) wetHeight = Math.Min(wetHeight, Level(neighbor));
         }
         return Math.Min(heights[index], wetHeight);
 

@@ -10,6 +10,7 @@ namespace Terraform.Patches;
 public partial class TerraformManager {
     private readonly WaterStreamSolver _streamSolver = new();
     private readonly List<Vector3> _leakOpenings = new();
+    private readonly Dictionary<int, List<Vector3>> _chunkLeakOpenings = new();
     private readonly Dictionary<long, GameObject> _leakTopVfx = new();
     private readonly Dictionary<long, GameObject> _landingAnchors = new();
     private readonly Dictionary<long, ParticleSystem> _fallEmitters = new();
@@ -44,6 +45,10 @@ public partial class TerraformManager {
     private const float WetCheckInterval = 0.5f;
     private const float PlayerWetRadius = 0.3f;
     private const float PoolWetHeight = 0.5f;
+    private const float LeakRoofThickness = 1f;
+    private const float LeakCavityMargin = 1f;
+    private const float LeakColumnSpacing = 0.5f;
+    private const float LeakProbeStep = 0.25f;
 
     private void RefreshWaterLeaks() {
         float waterY = ZoneSystem.instance != null ? ZoneSystem.instance.m_waterLevel : 30f;
@@ -67,19 +72,74 @@ public partial class TerraformManager {
 
     private void CollectLeakOpenings(float waterY) {
         _leakOpenings.Clear();
-        float pickaxeReach = PickaxeRadius + PickaxeNoiseAmplitude + 0.5f;
-        foreach (var data in _chunks.Values) {
+        if (_waterStreamsDirty) _chunkLeakOpenings.Clear();
+        foreach (var pair in _chunks) {
+            var data = pair.Value;
             if (data?.MeshObject == null || data.Heightmap == null) continue;
-            Vector3 origin = data.MeshObject.transform.position;
-            long chunkKey = ChunkKey(Mathf.RoundToInt(origin.x), Mathf.RoundToInt(origin.z));
-            if (!_chunkDigHistory.TryGetValue(chunkKey, out var digs)) continue;
-            foreach (var dig in digs) {
-                if (dig.Mode != DigMode.UndergroundTunnel && dig.Mode != DigMode.OpenHoleDeepen) continue;
-                if (!OriginalHeight(dig.WorldPos, out float terrainY) || terrainY >= waterY) continue;
-                if (Mathf.Abs(dig.WorldPos.y - terrainY) > pickaxeReach) continue;
-                _leakOpenings.Add(new Vector3(dig.WorldPos.x, terrainY, dig.WorldPos.z));
+            if (!_chunkLeakOpenings.TryGetValue(pair.Key, out var openings)) {
+                openings = FindChunkLeakOpenings(data, waterY);
+                _chunkLeakOpenings[pair.Key] = openings;
+            }
+            _leakOpenings.AddRange(openings);
+        }
+    }
+
+    private List<Vector3> FindChunkLeakOpenings(ChunkRenderData data, float waterY) {
+        var openings = new List<Vector3>();
+        Vector3 origin = data.MeshObject.transform.position;
+        long chunkKey = ChunkKey(Mathf.RoundToInt(origin.x), Mathf.RoundToInt(origin.z));
+        if (!_chunkDigHistory.TryGetValue(chunkKey, out var digs)) return openings;
+        float pickaxeReach = PickaxeRadius + PickaxeNoiseAmplitude + 0.5f;
+        foreach (var dig in digs) {
+            if (dig.Mode != DigMode.UndergroundTunnel && dig.Mode != DigMode.OpenHoleDeepen) continue;
+            if (!OriginalHeight(dig.WorldPos, out float terrainY) || terrainY >= waterY) continue;
+            if (Mathf.Abs(dig.WorldPos.y - terrainY) > pickaxeReach) continue;
+            if (!OpensPassageUnderWater(dig.WorldPos, pickaxeReach, waterY)) continue;
+            openings.Add(new Vector3(dig.WorldPos.x, terrainY, dig.WorldPos.z));
+        }
+        return openings;
+    }
+
+    private bool OpensPassageUnderWater(Vector3 center, float reach, float waterY) {
+        float radius = reach + LeakCavityMargin;
+        float bottomY = center.y - radius;
+        float breachBottom = float.PositiveInfinity;
+        float cavityTop = float.NegativeInfinity;
+        int steps = Mathf.CeilToInt(radius / LeakColumnSpacing);
+        for (int iz = -steps; iz <= steps; iz++)
+        for (int ix = -steps; ix <= steps; ix++) {
+            float dx = ix * LeakColumnSpacing, dz = iz * LeakColumnSpacing;
+            float distanceSq = dx * dx + dz * dz;
+            if (distanceSq > radius * radius) continue;
+            var column = new Vector3(center.x + dx, center.y, center.z + dz);
+            if (!OriginalHeight(column, out float bedY) || !TryGetChunkAt(column, out var data) || data.Chunk == null) continue;
+            if (!TryFindAirRunBelowBed(data, column, bedY, bottomY, out int roofSteps, out float runTop, out float runBottom)) continue;
+            if (roofSteps * LeakProbeStep >= LeakRoofThickness) cavityTop = Mathf.Max(cavityTop, runTop);
+            else if (roofSteps == 0 && bedY < waterY && distanceSq <= reach * reach) breachBottom = Mathf.Min(breachBottom, runBottom);
+        }
+        return breachBottom <= cavityTop + LeakProbeStep;
+    }
+
+    private static bool TryFindAirRunBelowBed(ChunkRenderData data, Vector3 column, float bedY, float bottomY,
+        out int roofSteps, out float runTop, out float runBottom) {
+        roofSteps = 0;
+        runTop = runBottom = float.NegativeInfinity;
+        int count = Mathf.FloorToInt((bedY - bottomY) / LeakProbeStep);
+        for (int i = 1; i <= count; i++) {
+            column.y = bedY - i * LeakProbeStep;
+            bool air = TryGetLocalVoxelPos(data, column, out Vector3 local)
+                && SampleSdfTri(data.Chunk, local.x, local.y, local.z) > 0f;
+            if (float.IsNegativeInfinity(runTop)) {
+                if (!air) continue;
+                roofSteps = i - 1;
+                runTop = runBottom = column.y;
+            } else if (air) {
+                runBottom = column.y;
+            } else {
+                return true;
             }
         }
+        return !float.IsNegativeInfinity(runTop);
     }
 
     private int LeakSignature() {

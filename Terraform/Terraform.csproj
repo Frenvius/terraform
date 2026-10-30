@@ -130,6 +130,7 @@
     <Compile Include="Patches\TerrainOpPatches.cs" />
     <Compile Include="Water\BucketWaterMath.cs" />
     <Compile Include="Water\PlacedWater.cs" />
+    <Compile Include="Water\PlacedWaterDepth.cs" />
     <Compile Include="Water\WaterTransfers.cs" />
     <Compile Include="Water\BucketLedger.cs" />
     <Compile Include="Water\WaterStreamSolver.cs" />

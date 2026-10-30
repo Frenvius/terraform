@@ -135,8 +135,16 @@ public class BucketWaterMathTests {
 
     [Fact]
     public void GentleSlopeKeepsAThinnerPuddle() {
-        float transfer = BucketWaterMath.Transfer(BucketWaterMath.RunoffDrop * 0.5f, BucketWaterMath.FilmDepth * 0.5f, 0f, 0f);
+        float transfer = BucketWaterMath.Transfer(BucketWaterMath.RestingDrop * 0.5f, BucketWaterMath.FilmDepth * 0.5f, 0f, 0f);
         Assert.Equal(0f, transfer, Tolerance);
+    }
+
+    [Fact]
+    public void SlopeSteeperThanTheRestingDropDrains() {
+        float floor = BucketWaterMath.RestingDrop * 2f;
+        float depth = BucketWaterMath.FilmDepth * 0.5f;
+        float unrestricted = (floor + depth) * BucketWaterMath.FlowRate;
+        Assert.Equal(unrestricted, BucketWaterMath.Transfer(floor, depth, 0f, 0f), Tolerance);
     }
 
     [Fact]
@@ -237,6 +245,15 @@ public class BucketWaterMathTests {
         heights[14] = 3f;
         depths[14] = 0.2f;
         Assert.Equal(0.4f, BucketWaterMath.Surface(heights, depths, 13, 4), Tolerance);
+    }
+
+    [Fact]
+    public void FilmBelowTheWetDepthCountsAsGround() {
+        var (heights, depths) = ShoreGrid();
+        depths[12] = 0.4f;
+        heights[13] = 1f;
+        depths[13] = 0.02f;
+        Assert.Equal(0.4f, BucketWaterMath.Surface(heights, depths, 13, 4, 0.05f), Tolerance);
     }
 
     [Fact]
