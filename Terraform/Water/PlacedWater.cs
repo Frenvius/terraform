@@ -4,7 +4,6 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using HarmonyLib;
-using Terraform.Configs;
 using Terraform.Network;
 using Terraform.Patches;
 using UnityEngine;
@@ -36,6 +35,7 @@ public sealed class PlacedWater : MonoBehaviour {
     private static readonly int DepthFadeId = Shader.PropertyToID("_DepthFade");
     private static readonly int ShoreFadeId = Shader.PropertyToID("_ShoreFade");
     private const float CameraDepthShoreFade = 0.03f;
+    private const float OpaqueDepth = 15f;
     private static readonly List<Renderer> DrawnRenderers = new();
     private static readonly List<Vector3> UpNormals = new(Enumerable.Repeat(Vector3.up, Size * Size));
     private static float _vanillaShoreFade;
@@ -195,7 +195,7 @@ public sealed class PlacedWater : MonoBehaviour {
             if (_material == null) return;
         }
         _material.SetFloat(WaterTimeId, Time.time);
-        _material.SetFloat(DepthFadeId, ModConfig.WaterOpaqueDepth.Value);
+        _material.SetFloat(DepthFadeId, OpaqueDepth);
         DrawnRenderers.Clear();
         foreach (var water in Instances)
             if (water != null && water._renderer != null && water._renderer.enabled) DrawnRenderers.Add(water._renderer);
