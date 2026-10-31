@@ -126,7 +126,8 @@ public partial class TerraformManager {
     private static void MarkSurfaceSeamTexels(
         ChunkRenderData data, Vector3[] verts, List<bool> onTerrainSurface, SubmeshSorter submeshes) {
         var usedBySurface = new bool[verts.Length];
-        foreach (int i in submeshes.Surface) usedBySurface[i] = true;
+        foreach (var indices in submeshes.SurfaceLists())
+            foreach (int i in indices) usedBySurface[i] = true;
 
         var seam = data.SurfaceSeamTexels;
         System.Array.Clear(seam, 0, seam.Length);
@@ -207,21 +208,32 @@ public partial class TerraformManager {
 
     private const int SurfaceSubmesh     = 0;
     private const int UndergroundSubmesh = 1;
-    private const int FirstPaintBandSubmesh = 2;
+    private const int WaterShadedSubmesh = 2;
+    private const int FirstPaintBandSubmesh = 3;
 
     private sealed class SubmeshSorter {
         private readonly ChunkRenderData _data;
         private readonly List<int>[] _bandIndices = new List<int>[PaintBandCount];
+        private readonly float _localWaterY;
 
         public readonly List<int> Surface;
+        public readonly List<int> WaterShaded;
         public readonly List<int> Underground;
         public readonly bool[] PaintedBands;
 
         public SubmeshSorter(ChunkRenderData data, bool[] paintedBands, int capacity) {
             _data = data;
+            float waterY = ZoneSystem.instance != null ? ZoneSystem.instance.m_waterLevel : 30f;
+            _localWaterY = waterY - data.MeshObject.transform.position.y;
             PaintedBands = paintedBands;
             Surface = new List<int>(capacity);
+            WaterShaded = new List<int>();
             Underground = new List<int>(capacity);
+        }
+
+        public IEnumerable<List<int>> SurfaceLists() {
+            yield return Surface;
+            yield return WaterShaded;
         }
 
         public int UndergroundTriangleCount {
@@ -232,7 +244,7 @@ public partial class TerraformManager {
             }
         }
 
-        public bool IsEmpty => Surface.Count == 0 && UndergroundTriangleCount == 0;
+        public bool IsEmpty => Surface.Count == 0 && WaterShaded.Count == 0 && UndergroundTriangleCount == 0;
 
         public IEnumerable<List<int>> UndergroundLists() {
             yield return Underground;
@@ -240,13 +252,16 @@ public partial class TerraformManager {
                 if (band != null) yield return band;
         }
 
-        public List<int> For(Vector3 localCentroid, Vector3 normal) {
-            if (localCentroid.y > NativeSurfaceLocalY(_data, localCentroid) - UndergroundEnterMarginY) return Surface;
-            if (!HasSolidAbove(_data, localCentroid + normal * UndergroundAirProbe)) return Surface;
+        public List<int> For(Vector3 localCentroid, float localMinY, Vector3 normal) {
+            if (localCentroid.y > NativeSurfaceLocalY(_data, localCentroid) - UndergroundEnterMarginY) return SurfaceFor(localCentroid, localMinY);
+            if (!HasSolidAbove(_data, localCentroid + normal * UndergroundAirProbe)) return SurfaceFor(localCentroid, localMinY);
             int band = PaintBandOf(localCentroid.y);
             if (!PaintedBands[band]) return Underground;
             return _bandIndices[band] ??= new List<int>();
         }
+
+        private List<int> SurfaceFor(Vector3 localCentroid, float localMinY) =>
+            localMinY >= _localWaterY || IsUnderWaterPlane(_data, localCentroid) ? WaterShaded : Surface;
 
         public void ApplyTo(ChunkRenderData data) {
             data.SubmeshPaintBands.Clear();
@@ -257,6 +272,7 @@ public partial class TerraformManager {
             mesh.subMeshCount = FirstPaintBandSubmesh + data.SubmeshPaintBands.Count;
             mesh.SetTriangles(Surface, SurfaceSubmesh, calculateBounds: false);
             mesh.SetTriangles(Underground, UndergroundSubmesh, calculateBounds: false);
+            mesh.SetTriangles(WaterShaded, WaterShadedSubmesh, calculateBounds: false);
             for (int i = 0; i < data.SubmeshPaintBands.Count; i++)
                 mesh.SetTriangles(_bandIndices[data.SubmeshPaintBands[i]], FirstPaintBandSubmesh + i, calculateBounds: false);
         }

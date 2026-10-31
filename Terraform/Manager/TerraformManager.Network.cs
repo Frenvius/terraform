@@ -47,8 +47,7 @@ public partial class TerraformManager {
         } else if (data.Chunk != null) {
             SeedIntactVoxels(data);
         } else {
-            ClearChunkMesh(data);
-            if (_waters.TryGetValue(data.Heightmap.GetInstanceID(), out var water)) RebuildWaterMeshFromHoles(water);
+            RebuildMesh(data);
             zone?.FlushQueuedDigs();
             return;
         }

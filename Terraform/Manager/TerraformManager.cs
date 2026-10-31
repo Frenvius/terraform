@@ -32,6 +32,8 @@ public partial class TerraformManager : MonoBehaviour {
     private const float PickaxeNoiseFrequency   = 0.6f;
     private const float PickaxeNoiseAmplitude   = 0.35f;
     private const float PickaxeHeightMultiplier = 1.0f;
+    private const float OpenHoleFunnelHeight    = 1.5f;
+    private const float OpenHoleFunnelSlope     = 1.0f;
 
     private const float SmoothRadius   = 3f;
     private const float SmoothPower    = 3f;

@@ -10,7 +10,7 @@ public static class WaterVolume_GetWaterSurface_Patch {
     static bool Prefix(Vector3 point, ref float __result) {
         var manager = TerraformManager.Instance;
         if (manager == null || !manager.HasDigsAround(point)) return true;
-        if (!manager.IsPlayerInVoxelCavity(point)) return true;
+        if (manager.IsInOpenWater(point) || !manager.IsPlayerInVoxelCavity(point)) return true;
         __result = NoWaterSentinel;
         return false;
     }

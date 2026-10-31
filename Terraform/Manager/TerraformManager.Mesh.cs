@@ -20,6 +20,14 @@ public partial class TerraformManager {
     }
 
     private void RebuildMesh(ChunkRenderData data) {
+        RefreshWaterPlane(data);
+        BuildVoxelMesh(data);
+        if (data.Heightmap != null && _waters.TryGetValue(data.Heightmap.GetInstanceID(), out var water))
+            RebuildWaterMeshFromHoles(water);
+        PropagateFloodChanges();
+    }
+
+    private void BuildVoxelMesh(ChunkRenderData data) {
         _waterStreamsDirty = true;
         var heights = data.Chunk != null ? GetHeightsArray(data.Heightmap) : null;
         int cornerStride = VoxelChunk.SIZE + 1;
@@ -84,6 +92,7 @@ public partial class TerraformManager {
             }
             var target = submeshes.For(
                 (verts[i0] + verts[i1] + verts[i2]) / 3f,
+                Mathf.Min(verts[i0].y, verts[i1].y, verts[i2].y),
                 (normals[i0] + normals[i1] + normals[i2]).normalized);
             target.Add(i0);
             target.Add(i1);

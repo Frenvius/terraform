@@ -157,24 +157,16 @@ public partial class TerraformManager {
         EnsureChunkAllocated(data);
     }
 
-    private void ClearChunkMesh(ChunkRenderData data) {
-        data.Mesh.Clear();
-        SetChunkVisible(data, false);
-        if (data.Collider != null) data.Collider.sharedMesh = null;
-    }
-
     private void RefreshChunkAfterStateChange(ChunkRenderData data) {
         RefreshCellOwnership(data, CellRect.Whole);
         RebuildMesh(data);
-        if (_waters.TryGetValue(data.Heightmap.GetInstanceID(), out var water)) RebuildWaterMeshFromHoles(water);
         Vector3 origin = data.MeshObject.transform.position;
         int originX = Mathf.RoundToInt(origin.x);
         int originZ = Mathf.RoundToInt(origin.z);
         MarkNavDirty(originX, originZ, originX + VoxelChunk.SIZE, originZ + VoxelChunk.SIZE);
     }
 
-    private static bool ChunkOverlapsDig(int chunkOriginX, int chunkOriginZ, Vector3 worldPos, float radius) {
-        float footprint = radius * OuterRadiusMultiplier;
+    private static bool ChunkOverlapsDig(int chunkOriginX, int chunkOriginZ, Vector3 worldPos, float footprint) {
         int worldCellMinX = Mathf.FloorToInt(worldPos.x - footprint);
         int worldCellMaxX = Mathf.FloorToInt(worldPos.x + footprint);
         int worldCellMinZ = Mathf.FloorToInt(worldPos.z - footprint);

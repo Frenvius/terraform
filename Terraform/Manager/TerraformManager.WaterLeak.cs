@@ -114,7 +114,7 @@ public partial class TerraformManager {
             var column = new Vector3(center.x + dx, center.y, center.z + dz);
             if (!OriginalHeight(column, out float bedY) || !TryGetChunkAt(column, out var data) || data.Chunk == null) continue;
             if (!TryFindAirRunBelowBed(data, column, bedY, bottomY, out int roofSteps, out float runTop, out float runBottom)) continue;
-            if (roofSteps * LeakProbeStep >= LeakRoofThickness) cavityTop = Mathf.Max(cavityTop, runTop);
+            if (roofSteps * LeakProbeStep >= LeakRoofThickness && runTop < waterY) cavityTop = Mathf.Max(cavityTop, runTop);
             else if (roofSteps == 0 && bedY < waterY && distanceSq <= reach * reach) breachBottom = Mathf.Min(breachBottom, runBottom);
         }
         return breachBottom <= cavityTop + LeakProbeStep;

@@ -207,6 +207,8 @@ public partial class TerraformManager {
             case DigMode.Smooth:
             case DigMode.Level:
                 return dig.Radius;
+            case DigMode.OpenHoleDeepen:
+                return PickaxeRadius + PickaxeNoiseAmplitude + OpenHoleFunnelHeight * OpenHoleFunnelSlope;
             default:
                 return PickaxeRadius + PickaxeNoiseAmplitude;
         }

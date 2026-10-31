@@ -161,6 +161,7 @@
     <Compile Include="Manager\TerraformManager.NavLinks.cs" />
     <Compile Include="Manager\TerraformManager.Water.cs" />
     <Compile Include="Manager\TerraformManager.WaterPunch.cs" />
+    <Compile Include="Manager\TerraformManager.WaterFlood.cs" />
     <Compile Include="Manager\TerraformManager.WaterLeak.cs" />
     <Compile Include="Manager\TerraformManager.WaterLeakDebug.cs" />
     <Compile Include="Persistence\TerraformPersistence.cs" />

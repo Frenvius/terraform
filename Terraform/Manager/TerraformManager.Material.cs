@@ -64,7 +64,7 @@ public partial class TerraformManager {
         if (liveMat == null) return;
 
         SetVoxelMaterial(data, liveMat);
-        MirrorTerrainRendererProperties(data);
+        MirrorTerrainRendererProperties(data, liveMat.GetFloat(WaterLevelId));
     }
 
     private static void SetVoxelMaterial(ChunkRenderData data, Material material) {
@@ -73,12 +73,14 @@ public partial class TerraformManager {
         data.Renderer.sharedMaterials = materials;
     }
 
-    private static void MirrorTerrainRendererProperties(ChunkRenderData data) {
+    private static void MirrorTerrainRendererProperties(ChunkRenderData data, float waterLevel) {
         var terrainRenderer = data.Heightmap.GetComponent<MeshRenderer>();
         if (terrainRenderer == null) return;
 
         _terrainRendererProperties ??= new MaterialPropertyBlock();
         terrainRenderer.GetPropertyBlock(_terrainRendererProperties);
+        _terrainRendererProperties.SetFloat(WaterLevelId, waterLevel);
+        data.Renderer.SetPropertyBlock(_terrainRendererProperties, WaterShadedSubmesh);
         _terrainRendererProperties.SetFloat(WaterLevelId, DryWaterLevel);
         data.Renderer.SetPropertyBlock(_terrainRendererProperties, SurfaceSubmesh);
         if (data.UndergroundMask != null) {

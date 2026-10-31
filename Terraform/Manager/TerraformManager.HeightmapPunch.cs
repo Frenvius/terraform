@@ -69,14 +69,16 @@ public partial class TerraformManager {
 
         Vector3 origin = data.MeshObject.transform.position;
         var heights = GetHeightsArray(hm);
+        float waterY = ZoneSystem.instance != null ? ZoneSystem.instance.m_waterLevel : 30f;
         TerrainComp tc = null;
         int painted = 0;
         for (int wcZ = wcMinZ; wcZ <= wcMaxZ; wcZ++)
         for (int wcX = wcMinX; wcX <= wcMaxX; wcX++) {
+            var cellCenter = new Vector3(wcX + 0.5f, 0f, wcZ + 0.5f);
+            if (SampleHeightmapMeshYCached(hm, heights, cellCenter, waterY) < waterY) continue;
             if (!CellGroundRemovedByVoxel(data, heights, origin, wcX, wcZ)) continue;
             tc ??= hm.GetAndCreateTerrainCompiler();
             if (tc == null) return 0;
-            var cellCenter = new Vector3(wcX + 0.5f, 0f, wcZ + 0.5f);
             if (tc.IsOwner()) PaintDirtCleared(tc, cellCenter, OpenedCellPaintRadius);
             else DirtPaintOp.Request(tc, cellCenter);
             painted++;

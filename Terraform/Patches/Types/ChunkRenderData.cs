@@ -25,4 +25,6 @@ public class ChunkRenderData {
     public readonly bool[] CellCrater = new bool[VoxelChunk.SIZE * VoxelChunk.SIZE];
     public readonly bool[] SurfaceSeamTexels = new bool[(VoxelChunk.SIZE + 1) * (VoxelChunk.SIZE + 1)];
     public float[] SurfaceLocalY;
+    public bool[] WaterPlaneWet;
+    public HashSet<(int x, int y)> DryWaterCells;
 }

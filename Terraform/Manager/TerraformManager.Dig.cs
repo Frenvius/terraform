@@ -39,11 +39,12 @@ public partial class TerraformManager {
         var swTotal = VerboseLogs ? System.Diagnostics.Stopwatch.StartNew() : null;
         int chunkHit = 0;
         float solidRemoved = 0f;
+        float footprint = Mathf.Max(radius * OuterRadiusMultiplier, DigFootprintRadius(record));
         foreach (var data in _chunks.Values) {
             if (data == null || data.MeshObject == null || data.Heightmap == null) continue;
 
             Vector3 origin = data.MeshObject.transform.position;
-            if (!ChunkOverlapsDig(Mathf.RoundToInt(origin.x), Mathf.RoundToInt(origin.z), worldPos, radius)) continue;
+            if (!ChunkOverlapsDig(Mathf.RoundToInt(origin.x), Mathf.RoundToInt(origin.z), worldPos, footprint)) continue;
 
             chunkHit++;
             solidRemoved += ApplyDigToChunk(data, record);
@@ -76,7 +77,6 @@ public partial class TerraformManager {
 
         RefreshCellOwnership(data, CellRectForDig(data, record));
         RebuildMesh(data);
-        if (_waters.TryGetValue(data.Heightmap.GetInstanceID(), out var water)) RebuildWaterMeshFromHoles(water);
 
         if (VerboseLogs) DebugLog(
             $"Dig world=({record.WorldPos.x:F2},{record.WorldPos.y:F2},{record.WorldPos.z:F2}) " +
@@ -117,8 +117,11 @@ public partial class TerraformManager {
             case DigMode.Level:
                 FlattenTowardPlane(data, dig);
                 break;
+            case DigMode.OpenHoleDeepen:
+                CarvePickaxeSphere(data, dig.WorldPos, OpenHoleFunnelHeight);
+                break;
             default:
-                CarvePickaxeSphere(data, dig.WorldPos);
+                CarvePickaxeSphere(data, dig.WorldPos, 0f);
                 break;
         }
     }
@@ -232,19 +235,19 @@ public partial class TerraformManager {
         }
     }
 
-    private void CarvePickaxeSphere(ChunkRenderData data, Vector3 worldPos) {
+    private void CarvePickaxeSphere(ChunkRenderData data, Vector3 worldPos, float funnelHeight) {
         Vector3 origin = data.MeshObject.transform.position;
         int chunkOriginX = Mathf.RoundToInt(origin.x);
         int chunkOriginY = Mathf.RoundToInt(origin.y);
         int chunkOriginZ = Mathf.RoundToInt(origin.z);
         int yFloor       = ProtectedYLocalExclusive(chunkOriginY);
 
-        float maxRadius  = PickaxeRadius + PickaxeNoiseAmplitude;
-        float maxRadiusY = maxRadius * PickaxeHeightMultiplier;
+        float maxRadius  = PickaxeRadius + PickaxeNoiseAmplitude + funnelHeight * OpenHoleFunnelSlope;
+        float maxRadiusY = (PickaxeRadius + PickaxeNoiseAmplitude) * PickaxeHeightMultiplier;
         int worldVxMin = Mathf.FloorToInt(worldPos.x - maxRadius)  - 1;
         int worldVxMax = Mathf.CeilToInt (worldPos.x + maxRadius)  + 1;
         int worldVyMin = Mathf.FloorToInt(worldPos.y - maxRadiusY) - 1;
-        int worldVyMax = Mathf.CeilToInt (worldPos.y + maxRadiusY) + 1;
+        int worldVyMax = Mathf.CeilToInt (worldPos.y + Mathf.Max(maxRadiusY, funnelHeight)) + 1;
         int worldVzMin = Mathf.FloorToInt(worldPos.z - maxRadius)  - 1;
         int worldVzMax = Mathf.CeilToInt (worldPos.z + maxRadius)  + 1;
 
@@ -269,7 +272,7 @@ public partial class TerraformManager {
             float noise = PickaxeNoiseAt(worldVx, worldVy, worldVz);
             float effectiveRadius = PickaxeRadius + noise * PickaxeNoiseAmplitude;
 
-            float sdf = effectiveRadius - dist;
+            float sdf = Mathf.Max(effectiveRadius - dist, FunnelSdf(dx, worldVy - worldPos.y, dz, effectiveRadius, funnelHeight));
             if (sdf < -1f) {
                 cornersOutsideSphere++;
                 continue;
@@ -289,6 +292,13 @@ public partial class TerraformManager {
                 $"chunkOrigin=({chunkOriginX},{chunkOriginY},{chunkOriginZ}) " +
                 $"writes={writes} skippedOutsideSphere={cornersOutsideSphere} outOfChunk={cornersOutOfChunk}");
         }
+    }
+
+    private static float FunnelSdf(float dx, float rise, float dz, float baseRadius, float funnelHeight) {
+        if (rise < 0f || rise > funnelHeight) return -1f;
+        float radius = baseRadius + rise * OpenHoleFunnelSlope;
+        float horizontal = Mathf.Sqrt(dx * dx + dz * dz);
+        return (radius - horizontal) / Mathf.Sqrt(1f + OpenHoleFunnelSlope * OpenHoleFunnelSlope);
     }
 
     private static float FlattenWeight(DigRecord dig, Vector3 delta) {
