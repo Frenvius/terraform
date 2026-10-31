@@ -1,0 +1,9 @@
+{
+  "name": "Terraform",
+  "version_number": "0.1.0",
+  "website_url": "https://discord.gg/MUx7h3UZcU",
+  "description": "True 3D terrain digging: carve tunnels, caves and arches with the pickaxe.",
+  "dependencies": [
+    "denikson-BepInExPack_Valheim-5.4.2360"
+  ]
+}
